@@ -1,0 +1,9 @@
+*.exe
+*.dll
+*.exp
+*.lib
+*.ttf
+*.txt
+*.ini
+*.clap
+bin/
