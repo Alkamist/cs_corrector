@@ -1,35 +1,26 @@
 package clap
 
-name_size :: 256
-path_size :: 1024
-plugin_factory_id :: "clap.plugin-factory"
-ext_note_ports :: "clap.note-ports"
-ext_latency :: "clap.latency"
-core_event_space_id :: 0
+NAME_SIZE :: 256
+PATH_SIZE :: 1024
+PLUGIN_FACTORY_ID :: "clap.plugin-factory"
+EXT_NOTE_PORTS :: "clap.note-ports"
+EXT_LATENCY :: "clap.latency"
+EXT_PARAMS :: "clap.params"
+CORE_EVENT_SPACE_ID :: 0
 
-// make_name :: proc(name: string) -> [name_size]u8 {
-//     name_len := len(name)
-//     result: [name_size]u8
-//     for i in 0 ..< name_size {
-//         if i < name_len {
-//             result[i] = name[i]
-//         } else {
-//             result[i] = 0
-//         }
-//     }
-//     return result
-// }
+Id :: u32
+Beat_Time :: i64
+Sec_Time :: i64
 
-// write_name :: proc(name_slot: ^[name_size]u8, name: string) {
-//     name_len := len(name)
-//     for i in 0 ..< name_size {
-//         if i < name_len {
-//             name_slot[i] = name[i]
-//         } else {
-//             name_slot[i] = 0
-//         }
-//     }
-// }
+write_string :: proc "c" (string_slot: []byte, value: string) {
+    n := copy(string_slot, value)
+    // enforce NUL termination
+    string_slot[min(n, len(string_slot) - 1)] = 0
+}
+
+version_is_compatible :: proc "c" (v: Version) -> bool {
+    return v.major >= 1;
+}
 
 Note_Dialect :: enum u32 {
     Clap,
@@ -39,27 +30,20 @@ Note_Dialect :: enum u32 {
 }
 
 Event_Type :: enum u16 {
-    Note_On = 0,
-    Note_Off = 1,
-    Note_Choke = 2,
-    Note_End = 3,
-    Note_Expression = 4,
-    Param_Value = 5,
-    Param_Mod = 6,
-    Param_Gesture_Begin = 7,
-    Param_Gesture_End = 8,
-    Transport = 9,
-    Midi = 10,
-    Midi_Sysex = 11,
-    Midi2 = 12,
+    Note_On,
+    Note_Off,
+    Note_Choke,
+    Note_End,
+    Note_Expression,
+    Param_Value,
+    Param_Mod,
+    Param_Gesture_Begin,
+    Param_Gesture_End,
+    Transport,
+    Midi,
+    Midi_Sysex,
+    Midi2,
 }
-
-version_is_compatible :: proc "c" (v: Version) -> bool {
-    // versions 0.x.y were used during development stage and aren't compatible
-    return v.major >= 1;
-}
-
-Id :: u32
 
 Event_Header :: struct {
     size: u32,
@@ -69,14 +53,22 @@ Event_Header :: struct {
     flags: u32,
 }
 
+Event_Param_Value :: struct {
+    header: Event_Header,
+    param_id: Id,
+    cookie: rawptr,
+    note_id: i32,
+    port_index: i16,
+    channel: i16,
+    key: i16,
+    value: f64,
+}
+
 Event_Midi :: struct {
     header: Event_Header,
     port_index: u16,
     data: [3]u8,
 }
-
-Beat_Time :: i64
-Sec_Time :: i64
 
 Event_Transport :: struct {
     header: Event_Header,
@@ -115,21 +107,11 @@ Output_Events :: struct {
 }
 
 Process_Status :: enum i32 {
-    Error = 0,
-
-    // Processing succeeded, keep processing.
-    Continue = 1,
-
-    // Processing succeeded, keep processing if the output is not quiet.
-    Continue_If_Not_Quiet = 2,
-
-    // Rely upon the plugin's tail to determine if the plugin should continue to process.
-    // see clap_plugin_tail
-    Tail = 3,
-
-    // Processing succeeded, but no more processing is required,
-    // until the next event or variation in audio input.
-    Sleep = 4,
+    Error,
+    Continue,
+    Continue_If_Not_Quiet,
+    Tail,
+    Sleep,
 }
 
 Plugin_Latency :: struct {
@@ -150,14 +132,53 @@ Process :: struct {
 
 Note_Port_Info :: struct {
     id: Id,
-    supported_dialects: bit_set[Note_Dialect],
-    preferred_dialect: bit_set[Note_Dialect],
-    name: [name_size]u8,
+    supported_dialects: bit_set[Note_Dialect; u32],
+    preferred_dialect: bit_set[Note_Dialect; u32],
+    name: [NAME_SIZE]byte,
 }
 
 Plugin_Note_Ports :: struct {
     count: proc "c" (plugin: ^Plugin, is_input: bool) -> u32,
     get: proc "c" (plugin: ^Plugin, index: u32, is_input: bool, info: ^Note_Port_Info) -> bool,
+}
+
+Param_Info_Flags :: enum u32 {
+    Is_Stepped,
+    Is_Periodic,
+    Is_Hidden,
+    Is_Read_Only,
+    Is_Bypass,
+    Is_Automatable,
+    Is_Automatable_Per_Note_Id,
+    Is_Automatable_Per_Key,
+    Is_Automatable_Per_Channel,
+    Is_Automatable_Per_Port,
+    Is_Modulatable,
+    Is_Modulatable_Per_Note_Id,
+    Is_Modulatable_Per_Key,
+    Is_Modulatable_Per_Channel,
+    Is_Modulatable_Per_Port,
+    Requires_Process,
+}
+
+Param_Info :: struct {
+    id: Id,
+    flags: bit_set[Param_Info_Flags; u32],
+    cookie: rawptr,
+    name: [NAME_SIZE]byte,
+    module: [PATH_SIZE]byte,
+    min_value: f64,
+    max_value: f64,
+    default_value: f64,
+}
+
+Plugin_Params :: struct {
+    count: proc "c" (plugin: ^Plugin) -> u32,
+    get_info: proc "c" (plugin: ^Plugin, param_index: u32, param_info: ^Param_Info) -> bool,
+    get_value: proc "c" (plugin: ^Plugin, param_id: Id, out_value: ^f64) -> bool,
+    value_to_text: proc "c" (plugin: ^Plugin, param_id: Id, value: f64, out_buffer: [^]byte, out_buffer_capacity: u32) -> bool,
+    text_to_value: proc "c" (plugin: ^Plugin, param_id: Id, param_value_text: cstring, out_value: ^f64) -> bool,
+    flush: proc "c" (plugin: ^Plugin, input: ^Input_Events, output: ^Output_Events),
 }
 
 Plugin_Descriptor :: struct {
@@ -170,7 +191,7 @@ Plugin_Descriptor :: struct {
     support_url: cstring,
     version: cstring,
     description: cstring,
-    features: ^cstring,
+    features: [^]cstring,
 }
 
 Plugin :: struct {

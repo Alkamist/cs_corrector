@@ -1,6 +1,7 @@
 package main
 
 import "core:runtime"
+import "core:sync"
 // import "core:slice"
 import "clap"
 
@@ -18,24 +19,33 @@ plugin_descriptor := clap.Plugin_Descriptor{
 Plugin :: struct {
     clap_plugin: clap.Plugin,
     midi_events: [dynamic]clap.Event_Midi,
+    parameters_main_thread: [PARAMETER_COUNT]Parameter,
+    parameters_audio_thread: [PARAMETER_COUNT]Parameter,
+    parameter_mutex: sync.Mutex,
     latency: u32,
 }
 
 plugin_create_instance :: proc() -> ^clap.Plugin {
     plugin := new(Plugin)
-    plugin.clap_plugin.desc = &plugin_descriptor
-    plugin.clap_plugin.plugin_data = plugin
-    plugin.clap_plugin.init = plugin_init
-    plugin.clap_plugin.destroy = plugin_destroy
-    plugin.clap_plugin.activate = plugin_activate
-    plugin.clap_plugin.deactivate = plugin_deactivate
-    plugin.clap_plugin.start_processing = plugin_start_processing
-    plugin.clap_plugin.stop_processing = plugin_stop_processing
-    plugin.clap_plugin.reset = plugin_reset
-    plugin.clap_plugin.process = plugin_process
-    plugin.clap_plugin.get_extension = plugin_get_extension
-    plugin.clap_plugin.on_main_thread = plugin_on_main_thread
-	return &plugin.clap_plugin
+    plugin.clap_plugin = {
+        desc = &plugin_descriptor,
+        plugin_data = plugin,
+        init = plugin_init,
+        destroy = plugin_destroy,
+        activate = plugin_activate,
+        deactivate = plugin_deactivate,
+        start_processing = plugin_start_processing,
+        stop_processing = plugin_stop_processing,
+        reset = plugin_reset,
+        process = plugin_process,
+        get_extension = plugin_get_extension,
+        on_main_thread = plugin_on_main_thread,
+    }
+    return &plugin.clap_plugin
+}
+
+get_plugin :: proc "c" (clap_plugin: ^clap.Plugin) -> ^Plugin {
+    return cast(^Plugin)clap_plugin.plugin_data
 }
 
 // decrease_midi_events_time :: proc(plugin: ^Plugin, time: u32) {
@@ -71,14 +81,14 @@ plugin_create_instance :: proc() -> ^clap.Plugin {
 // }
 
 plugin_init :: proc "c" (clap_plugin: ^clap.Plugin) -> bool {
-    plugin := cast(^Plugin)clap_plugin.plugin_data
+    plugin := get_plugin(clap_plugin)
     plugin.latency = 2048
     return true
 }
 
 plugin_destroy :: proc "c" (clap_plugin: ^clap.Plugin) {
     context = runtime.default_context()
-    plugin := cast(^Plugin)clap_plugin.plugin_data
+    plugin := get_plugin(clap_plugin)
     delete(plugin.midi_events)
     free(plugin)
 }
@@ -100,81 +110,88 @@ plugin_stop_processing :: proc "c" (clap_plugin: ^clap.Plugin) {
 plugin_reset :: proc "c" (clap_plugin: ^clap.Plugin) {
 }
 
-plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Process) -> clap.Process_Status {
-    context = runtime.default_context()
-    plugin := cast(^Plugin)clap_plugin.plugin_data
-
-    // frame_count := clap_process.frames_count
-    event_count := clap_process.in_events.size(clap_process.in_events)
-
-    for event_index in 0 ..< event_count {
-        event_header := clap_process.in_events.get(clap_process.in_events, event_index)
-        if event_header.space_id == clap.core_event_space_id {
-            #partial switch event_header.type {
-            case .Midi: {
-                event := (cast(^clap.Event_Midi)event_header)^
-                clap_process.out_events.try_push(clap_process.out_events, event_header)
-            }
-            }
-        }
-    }
-
-    return .Continue
-}
-
 // plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Process) -> clap.Process_Status {
 //     context = runtime.default_context()
-//     plugin := cast(^Plugin)clap_plugin.plugin_data
+//     plugin := get_plugin(clap_plugin)
 
-//     frame_count := clap_process.frames_count
+//     // frame_count := clap_process.frames_count
 //     event_count := clap_process.in_events.size(clap_process.in_events)
-//     event_index := u32(0)
-//     next_event_index := u32(0)
-//     if event_count == 0 {
-//         next_event_index = frame_count
-//     }
-//     frame := u32(0)
 
-//     for frame < frame_count {
-//         for event_index < event_count && next_event_index == frame {
-//             event_header := clap_process.in_events.get(clap_process.in_events, event_index)
-//             if event_header.time != frame {
-//                 next_event_index = event_header.time
-//                 break
-//             }
-
-//             if event_header.space_id == clap.core_event_space_id {
-//                 #partial switch event_header.type {
-//                 case .Midi: {
-//                     event := (cast(^clap.Event_Midi)event_header)^
-//                     // event.header.time += 2048
-//                     append(&plugin.midi_events, event)
-//                 }
-//                 }
-//             }
-
-//             event_index += 1
-
-//             if (event_index == event_count) {
-//                 next_event_index = frame_count
-//                 break
+//     for event_index in 0 ..< event_count {
+//         event_header := clap_process.in_events.get(clap_process.in_events, event_index)
+//         if event_header.space_id == clap.CORE_EVENT_SPACE_ID {
+//             #partial switch event_header.type {
+//             case .Midi:
+//                 // event := (cast(^clap.Event_Midi)event_header)^
+//                 clap_process.out_events.try_push(clap_process.out_events, event_header)
 //             }
 //         }
-
-//         push_midi_events(plugin, clap_process.frames_count, clap_process.out_events)
-
-//         frame = next_event_index
 //     }
-
-//     decrease_midi_events_time(plugin, clap_process.frames_count)
 
 //     return .Continue
 // }
 
+plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Process) -> clap.Process_Status {
+    context = runtime.default_context()
+    plugin := get_plugin(clap_plugin)
+
+    frame_count := clap_process.frames_count
+    event_count := clap_process.in_events.size(clap_process.in_events)
+    event_index := u32(0)
+    next_event_index := u32(0)
+    if event_count == 0 {
+        next_event_index = frame_count
+    }
+    frame := u32(0)
+
+    parameters_sync_main_to_audio(plugin, clap_process.out_events)
+
+    for frame < frame_count {
+        for event_index < event_count && next_event_index == frame {
+            event_header := clap_process.in_events.get(clap_process.in_events, event_index)
+            if event_header.time != frame {
+                next_event_index = event_header.time
+                break
+            }
+
+            if event_header.space_id == clap.CORE_EVENT_SPACE_ID {
+                #partial switch event_header.type {
+                case .Param_Value:
+                    event := cast(^clap.Event_Param_Value)event_header
+                    sync.lock(&plugin.parameter_mutex)
+                    plugin.parameters_audio_thread[event.param_id].value = event.value
+                    plugin.parameters_audio_thread[event.param_id].changed = true
+                    sync.unlock(&plugin.parameter_mutex)
+                // case .Midi:
+                //     event := (cast(^clap.Event_Midi)event_header)^
+                //     // event.header.time += 2048
+                //     append(&plugin.midi_events, event)
+                }
+            }
+
+            event_index += 1
+
+            if (event_index == event_count) {
+                next_event_index = frame_count
+                break
+            }
+        }
+
+        // push_midi_events(plugin, clap_process.frames_count, clap_process.out_events)
+
+        frame = next_event_index
+    }
+
+    // decrease_midi_events_time(plugin, clap_process.frames_count)
+
+    return .Continue
+}
+
 plugin_get_extension :: proc "c" (clap_plugin: ^clap.Plugin, id: cstring) -> rawptr {
     switch id {
-    case clap.ext_note_ports: return &note_ports_extension
-    case clap.ext_latency: return &latency_extension
+    case clap.EXT_NOTE_PORTS: return &note_ports_extension
+    case clap.EXT_LATENCY: return &latency_extension
+    case clap.EXT_PARAMS: return &parameters_extension
     case: return nil
     }
 }
