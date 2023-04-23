@@ -4,7 +4,32 @@ name_size :: 256
 path_size :: 1024
 plugin_factory_id :: "clap.plugin-factory"
 ext_note_ports :: "clap.note-ports"
+ext_latency :: "clap.latency"
 core_event_space_id :: 0
+
+// make_name :: proc(name: string) -> [name_size]u8 {
+//     name_len := len(name)
+//     result: [name_size]u8
+//     for i in 0 ..< name_size {
+//         if i < name_len {
+//             result[i] = name[i]
+//         } else {
+//             result[i] = 0
+//         }
+//     }
+//     return result
+// }
+
+// write_name :: proc(name_slot: ^[name_size]u8, name: string) {
+//     name_len := len(name)
+//     for i in 0 ..< name_size {
+//         if i < name_len {
+//             name_slot[i] = name[i]
+//         } else {
+//             name_slot[i] = 0
+//         }
+//     }
+// }
 
 Note_Dialect :: enum u32 {
     Clap,
@@ -105,6 +130,10 @@ Process_Status :: enum i32 {
     // Processing succeeded, but no more processing is required,
     // until the next event or variation in audio input.
     Sleep = 4,
+}
+
+Plugin_Latency :: struct {
+    get: proc "c" (plugin: ^Plugin) -> u32,
 }
 
 Process :: struct {
