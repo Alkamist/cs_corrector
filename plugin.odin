@@ -37,7 +37,7 @@ millis_to_samples :: proc "c" (plugin: ^Plugin, seconds: f64) -> i32 {
     return i32(plugin.sample_rate * seconds * 0.001)
 }
 
-push_midi_event_from_cs_corrector :: proc(event: cs.Midi_Event) {
+push_midi_event_from_cs_corrector :: proc(event: ^cs.Midi_Event) {
     ctx := cast(^Cs_Corrector_Context)context.user_ptr
     clap_event := clap.Event_Midi{
         header = {
@@ -92,11 +92,11 @@ plugin_activate :: proc "c" (clap_plugin: ^clap.Plugin, sample_rate: f64, min_fr
     plugin := get_plugin(clap_plugin)
     plugin.sample_rate = sample_rate
     plugin.latency = 0
-    plugin.cs_corrector.legato_first_delay = millis_to_samples(plugin, 60.0)
-    plugin.cs_corrector.legato_level0_delay = millis_to_samples(plugin, 300.0)
-    plugin.cs_corrector.legato_level1_delay = millis_to_samples(plugin, 300.0)
-    plugin.cs_corrector.legato_level2_delay = millis_to_samples(plugin, 300.0)
-    plugin.cs_corrector.legato_level3_delay = millis_to_samples(plugin, 300.0)
+    plugin.cs_corrector.legato_first_delay = millis_to_samples(plugin, -60.0)
+    plugin.cs_corrector.legato_level0_delay = millis_to_samples(plugin, -300.0)
+    plugin.cs_corrector.legato_level1_delay = millis_to_samples(plugin, -300.0)
+    plugin.cs_corrector.legato_level2_delay = millis_to_samples(plugin, -300.0)
+    plugin.cs_corrector.legato_level3_delay = millis_to_samples(plugin, -300.0)
     return true
 }
 
