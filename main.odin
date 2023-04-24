@@ -19,6 +19,8 @@ plugin_factory := clap.Plugin_Factory{
             return nil
         }
 
+        reaper_load_functions(host)
+
         if plugin_id == plugin_descriptor.id {
             return plugin_create_instance(host)
         }

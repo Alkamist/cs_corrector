@@ -1,5 +1,7 @@
 package main
 
+import "core:runtime"
+import "core:strings"
 import "clap"
 import cs "cs_corrector"
 
@@ -15,11 +17,14 @@ unregister_timer :: proc "c" (plugin: ^Plugin, id: clap.Id) {
 
 timer_extension := clap.Plugin_Timer_Support{
     on_timer = proc "c" (clap_plugin: ^clap.Plugin, timer_id: clap.Id) {
+        context = runtime.default_context()
         plugin := get_plugin(clap_plugin)
-        print(plugin, "test")
-        // if cs.debug_text_changed {
-        //     // popup(cs.debug_text)
-        //     cs.debug_text_changed = false
-        // }
+        if debug_text_changed {
+            debug_text_cstring := strings.clone_to_cstring(strings.to_string(debug_text))
+            show_console_msg(debug_text_cstring)
+            delete(debug_text_cstring)
+            strings.builder_reset(&debug_text)
+            debug_text_changed = false
+        }
     },
 }

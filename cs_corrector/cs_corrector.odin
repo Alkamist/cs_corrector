@@ -1,15 +1,9 @@
 package cs_corrector
 
 import "core:slice"
+import "core:fmt"
 
-// debug_text_changed := false
-// debug_text: cstring
-
-// debug :: proc(text: cstring) {
-//     delete(debug_text)
-//     debug_text = text
-//     debug_text_changed = true
-// }
+print: proc(text: string)
 
 KEY_COUNT :: 128
 
@@ -95,7 +89,7 @@ push_midi_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(ev
     // Loop through events and push any that are inside the frame count
     for event in cs.midi_events {
         if event.time < frame_count {
-            // debug("test")
+            print(fmt.aprintf("%v", event))
             push_proc(event^)
             #partial switch midi_message_kind(event.data) {
             case .Note_Off, .Note_On:

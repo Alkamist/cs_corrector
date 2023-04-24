@@ -3,8 +3,19 @@ package main
 import "core:runtime"
 import "core:sync"
 import "core:slice"
+import "core:strings"
 import "clap"
 import cs "cs_corrector"
+
+debug_text_changed := false
+debug_text := strings.builder_make_none()
+print :: proc(text: string) {
+    text_with_newline := strings.concatenate({text, "\n"})
+    strings.write_string(&debug_text, text_with_newline)
+    delete(text_with_newline)
+    delete(text)
+    debug_text_changed = true
+}
 
 plugin_descriptor := clap.Plugin_Descriptor{
 	id = "com.alkamist.cs_corrector",
@@ -81,7 +92,8 @@ plugin_create_instance :: proc(host: ^clap.Host) -> ^clap.Plugin {
 
 plugin_init :: proc "c" (clap_plugin: ^clap.Plugin) -> bool {
     plugin := get_plugin(clap_plugin)
-    register_timer(plugin, 1000, &plugin.timer_id)
+    cs.print = print
+    register_timer(plugin, 0, &plugin.timer_id)
     return true
 }
 
