@@ -14,21 +14,25 @@ plugin_factory := clap.Plugin_Factory{
 
     create_plugin = proc "c" (factory: ^clap.Plugin_Factory, host: ^clap.Host, plugin_id: cstring) -> ^clap.Plugin {
         context = runtime.default_context()
+
         if !clap.version_is_compatible(host.clap_version) {
-            return nil;
+            return nil
         }
+
         if plugin_id == plugin_descriptor.id {
-            return plugin_create_instance();
+            return plugin_create_instance(host)
         }
-        return nil;
+
+        return nil
     },
-};
+}
 
 @export
 clap_entry := clap.Plugin_Entry{
 	clap_version = clap.Version{1, 1, 7},
+
 	init = proc "c" (plugin_path: cstring) -> bool {
-        return true;
+        return true
     },
 
 	deinit = proc "c" () {
@@ -36,8 +40,9 @@ clap_entry := clap.Plugin_Entry{
 
 	get_factory = proc "c" (factory_id: cstring) -> rawptr {
         if factory_id == clap.PLUGIN_FACTORY_ID {
-            return &plugin_factory;
+            return &plugin_factory
         }
-        return nil;
+
+        return nil
     },
-};
+}

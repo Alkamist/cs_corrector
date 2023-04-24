@@ -18,6 +18,7 @@ plugin_descriptor := clap.Plugin_Descriptor{
 }
 
 Plugin :: struct {
+    clap_host: ^clap.Host
     clap_plugin: clap.Plugin,
     cs_corrector: cs.Cs_Corrector,
     sample_rate: f64,
@@ -26,6 +27,7 @@ Plugin :: struct {
     parameters_main_thread: [PARAMETER_COUNT]Parameter,
     parameters_audio_thread: [PARAMETER_COUNT]Parameter,
     parameter_mutex: sync.Mutex,
+    timer_id: clap.Id,
 }
 
 Cs_Corrector_Context :: struct {
@@ -37,7 +39,7 @@ millis_to_samples :: proc "c" (plugin: ^Plugin, seconds: f64) -> i32 {
     return i32(plugin.sample_rate * seconds * 0.001)
 }
 
-push_midi_event_from_cs_corrector :: proc(event: ^cs.Midi_Event) {
+push_midi_event_from_cs_corrector :: proc(event: cs.Midi_Event) {
     ctx := cast(^Cs_Corrector_Context)context.user_ptr
     clap_event := clap.Event_Midi{
         header = {
@@ -57,8 +59,9 @@ get_plugin :: proc "c" (clap_plugin: ^clap.Plugin) -> ^Plugin {
     return cast(^Plugin)clap_plugin.plugin_data
 }
 
-plugin_create_instance :: proc() -> ^clap.Plugin {
+plugin_create_instance :: proc(host: ^clap.Host) -> ^clap.Plugin {
     plugin := new(Plugin)
+    plugin.clap_host = host
     plugin.clap_plugin = {
         desc = &plugin_descriptor,
         plugin_data = plugin,
@@ -78,6 +81,7 @@ plugin_create_instance :: proc() -> ^clap.Plugin {
 
 plugin_init :: proc "c" (clap_plugin: ^clap.Plugin) -> bool {
     plugin := get_plugin(clap_plugin)
+    register_timer(plugin, 1000, &plugin.timer_id)
     return true
 }
 
@@ -85,6 +89,7 @@ plugin_destroy :: proc "c" (clap_plugin: ^clap.Plugin) {
     context = runtime.default_context()
     plugin := get_plugin(clap_plugin)
     cs.destroy(&plugin.cs_corrector)
+    unregister_timer(plugin, plugin.timer_id)
     free(plugin)
 }
 
@@ -183,6 +188,7 @@ plugin_get_extension :: proc "c" (clap_plugin: ^clap.Plugin, id: cstring) -> raw
     case clap.EXT_NOTE_PORTS: return &note_ports_extension
     case clap.EXT_LATENCY: return &latency_extension
     case clap.EXT_PARAMS: return &parameters_extension
+    case clap.EXT_TIMER_SUPPORT: return &timer_extension
     case: return nil
     }
 }

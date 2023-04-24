@@ -2,11 +2,12 @@ package clap
 
 NAME_SIZE :: 256
 PATH_SIZE :: 1024
+CORE_EVENT_SPACE_ID :: 0
 PLUGIN_FACTORY_ID :: "clap.plugin-factory"
 EXT_NOTE_PORTS :: "clap.note-ports"
 EXT_LATENCY :: "clap.latency"
 EXT_PARAMS :: "clap.params"
-CORE_EVENT_SPACE_ID :: 0
+EXT_TIMER_SUPPORT :: "clap.timer-support"
 
 Id :: u32
 Beat_Time :: i64
@@ -213,6 +214,15 @@ Version :: struct {
     major: u32,
     minor: u32,
     revision: u32,
+}
+
+Plugin_Timer_Support :: struct {
+    on_timer: proc "c" (plugin: ^Plugin, timer_id: Id),
+}
+
+Host_Timer_Support :: struct {
+    register_timer: proc "c" (host: ^Host, period_ms: u32, timer_id: ^Id) -> bool,
+    unregister_timer: proc "c" (host: ^Host, timer_id: Id) -> bool,
 }
 
 Host :: struct {
