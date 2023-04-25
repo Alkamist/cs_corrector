@@ -7,11 +7,14 @@ import "core:strings"
 import "clap"
 import cs "cs_corrector"
 
+debug_text_mutex: sync.Mutex
 debug_text_changed := false
 debug_text := strings.builder_make_none()
 print :: proc(text: string) {
     text_with_newline := strings.concatenate({text, "\n"})
+    sync.lock(&debug_text_mutex)
     strings.write_string(&debug_text, text_with_newline)
+    sync.unlock(&debug_text_mutex)
     delete(text_with_newline)
     delete(text)
     debug_text_changed = true
@@ -118,6 +121,9 @@ plugin_activate :: proc "c" (clap_plugin: ^clap.Plugin, sample_rate: f64, min_fr
 }
 
 plugin_deactivate :: proc "c" (clap_plugin: ^clap.Plugin) {
+    context = runtime.default_context()
+    plugin := get_plugin(clap_plugin)
+    cs.destroy(&plugin.cs_corrector)
 }
 
 plugin_start_processing :: proc "c" (clap_plugin: ^clap.Plugin) -> bool {
@@ -166,7 +172,7 @@ plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Proce
                 case .Midi:
                     event := (cast(^clap.Event_Midi)event_header)
                     if event.port_index == plugin.midi_port {
-                        cs.append_event(&plugin.cs_corrector, cs.Midi_Event{
+                        cs.process_event(&plugin.cs_corrector, cs.Midi_Event{
                             time = event.header.time,
                             data = event.data,
                         })
@@ -190,7 +196,7 @@ plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Proce
         midi_port = plugin.midi_port,
         out_events = clap_process.out_events,
     }
-    cs.push_midi_events(&plugin.cs_corrector, frame_count, push_midi_event_from_cs_corrector)
+    cs.push_events(&plugin.cs_corrector, frame_count, push_midi_event_from_cs_corrector)
 
     return .Continue
 }

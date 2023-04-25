@@ -3,16 +3,6 @@ package main
 import "clap"
 import "core:c"
 
-// show_console_msg :: proc "c" (plugin: ^Plugin, text: cstring) {
-//     reaper_plugin_info := cast(^Reaper_Plugin_Info)plugin.clap_host.get_extension(plugin.clap_host, "cockos.reaper_extension")
-//     show_console_msg := cast(ShowConsoleMsg)reaper_plugin_info.get_func("ShowConsoleMsg")
-//     if show_console_msg != nil {
-//         show_console_msg(text)
-//     }
-// }
-
-// ShowConsoleMsg :: #type proc "c" (msg: cstring)
-
 reaper_load_functions :: proc "c" (clap_host: ^clap.Host) {
     reaper_plugin_info := cast(^Reaper_Plugin_Info)clap_host.get_extension(clap_host, "cockos.reaper_extension")
     show_console_msg = cast(type_of(show_console_msg))reaper_plugin_info.get_func("ShowConsoleMsg")

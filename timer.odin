@@ -1,5 +1,6 @@
 package main
 
+import "core:sync"
 import "core:runtime"
 import "core:strings"
 import "clap"
@@ -19,12 +20,15 @@ timer_extension := clap.Plugin_Timer_Support{
     on_timer = proc "c" (clap_plugin: ^clap.Plugin, timer_id: clap.Id) {
         context = runtime.default_context()
         plugin := get_plugin(clap_plugin)
+
         if debug_text_changed {
+            sync.lock(&debug_text_mutex)
             debug_text_cstring := strings.clone_to_cstring(strings.to_string(debug_text))
             show_console_msg(debug_text_cstring)
             delete(debug_text_cstring)
             strings.builder_reset(&debug_text)
             debug_text_changed = false
+            sync.unlock(&debug_text_mutex)
         }
     },
 }

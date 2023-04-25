@@ -9,7 +9,8 @@ KEY_COUNT :: 128
 
 Cs_Corrector :: struct {
     midi_events: [dynamic]^Midi_Event,
-    note_on_off_pairs: [KEY_COUNT][dynamic]Note_On_Off_Pair,
+    notes: [KEY_COUNT][dynamic]^Note,
+    last_note: [KEY_COUNT]^Note,
     held_key: Maybe(u8),
     legato_first_delay: i32, // Freshly pressed key
     legato_level0_delay: i32, // Lowest velocity legato
@@ -19,8 +20,11 @@ Cs_Corrector :: struct {
 }
 
 destroy :: proc(cs: ^Cs_Corrector) {
-    for pairs in cs.note_on_off_pairs {
-        delete(pairs)
+    for notes in cs.notes {
+        for note in notes {
+            free(note)
+        }
+        delete(notes)
     }
     for event in cs.midi_events {
         free(event)
@@ -38,9 +42,11 @@ required_latency :: proc(cs: ^Cs_Corrector) -> u32 {
     )))
 }
 
-append_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
-    #partial switch midi_message_kind(event.data) {
+process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
+    event := new_clone(event)
+    delay := i32(0)
 
+    #partial switch midi_message_kind(event.data) {
     case .Note_Off:
         event_key := midi_key(event.data)
 
@@ -48,53 +54,49 @@ append_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
         if key_is_held && event_key == held_key {
             cs.held_key = nil
         }
-        _append_with_delay(cs, event, 0)
 
-        // Find the first unfinished note-on-off pair of the same key and finish it
-        for pair in &cs.note_on_off_pairs[event_key] {
-            if pair.off == nil {
-                pair.off = _last_midi_event(cs)
-                break
-            }
+        // Finish the last note on this key
+        if cs.last_note[event_key] != nil {
+            cs.last_note[event_key].off = event
         }
+
+        print(fmt.aprintf("%v", cs.midi_events))
 
     case .Note_On:
         event_key := midi_key(event.data)
 
         _, key_is_held := cs.held_key.?
         if key_is_held {
-            _append_with_delay(cs, event, cs.legato_level0_delay)
+            delay = cs.legato_level0_delay
         } else {
-            _append_with_delay(cs, event, cs.legato_first_delay)
+            delay = cs.legato_first_delay
         }
         cs.held_key = event_key
 
-        // Start a note-on-off pair
-        append(&cs.note_on_off_pairs[event_key], Note_On_Off_Pair{
-            on = _last_midi_event(cs),
-            off = nil,
-        })
+        // Start a new note
+        note := new(Note)
+        note.on = event
+        append(&cs.notes[event_key], note)
+        cs.last_note[event_key] = note
 
-    case:
-        _append_with_delay(cs, event, 0)
+        print(fmt.aprintf("%v", cs.midi_events))
     }
+
+    event.time += u32(i32(required_latency(cs)) + delay)
+    append(&cs.midi_events, event)
 }
 
-push_midi_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(event: Midi_Event)) {
-    _sort_midi_events_by_time(cs)
+push_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(event: Midi_Event)) {
     _fix_note_overlaps(cs)
+    _sort_events_by_time(cs)
 
     keep_events: [dynamic]^Midi_Event
 
     // Loop through events and push any that are inside the frame count
     for event in cs.midi_events {
         if event.time < frame_count {
-            print(fmt.aprintf("%v", event))
+            // print(fmt.aprintf("%v", cs.notes))
             push_proc(event^)
-            #partial switch midi_message_kind(event.data) {
-            case .Note_Off, .Note_On:
-                _mark_note_event_sent(cs, event)
-            }
             free(event)
         } else {
             append(&keep_events, event)
@@ -104,79 +106,34 @@ push_midi_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(ev
     delete(cs.midi_events)
     cs.midi_events = keep_events
 
-    _decrease_midi_events_time(cs, frame_count)
+    _clear_unused_notes(cs)
+    _descrease_event_times(cs, frame_count)
 }
 
-_mark_note_event_sent :: proc(cs: ^Cs_Corrector, event: ^Midi_Event) {
-    key := midi_key(event.data)
-    for pair in &cs.note_on_off_pairs[key] {
-        if pair.on == event {
-            pair.on_sent = true
-        }
-        if pair.off == event {
-            pair.off_sent = true
-        }
-    }
-}
-
-_fix_note_overlaps :: proc(cs: ^Cs_Corrector) {
-    _clear_unused_note_on_off_pairs(cs)
-    _sort_note_on_off_pairs_by_time(cs)
-    for pairs in &cs.note_on_off_pairs {
-        for i in 1 ..< len(pairs) {
-            off := pairs[i - 1].off
-            on := pairs[i].on
-            if off != nil && on != nil && off.time >= on.time {
-                off.time = on.time - 1
-            }
-        }
-    }
-}
-
-_clear_unused_note_on_off_pairs :: proc(cs: ^Cs_Corrector) {
-    keep_pairs: [KEY_COUNT][dynamic]Note_On_Off_Pair
-
-    for pairs, key in &cs.note_on_off_pairs {
-        for pair in &pairs {
-            if !pair.on_sent || !pair.off_sent {
-                append(&keep_pairs[key], pair)
-            }
-        }
-        delete(cs.note_on_off_pairs[key])
-    }
-
-    cs.note_on_off_pairs = keep_pairs
-}
-
-_last_midi_event :: proc(cs: ^Cs_Corrector) -> ^Midi_Event {
-    return cs.midi_events[len(cs.midi_events) - 1]
-}
-
-_append_with_delay :: proc(cs: ^Cs_Corrector, event: Midi_Event, delay: i32) {
-    event := new_clone(event)
-    event.time += u32(i32(required_latency(cs)) + delay)
-    append(&cs.midi_events, event)
-}
-
-_decrease_midi_events_time :: proc(cs: ^Cs_Corrector, time: u32) {
+_descrease_event_times :: proc(cs: ^Cs_Corrector, time: u32) {
     for event in cs.midi_events {
         event.time -= time
     }
 }
 
-_sort_note_on_off_pairs_by_time :: proc(cs: ^Cs_Corrector) {
-    for pairs in &cs.note_on_off_pairs {
-        slice.sort_by(pairs[:], proc(i, j: Note_On_Off_Pair) -> bool {
-            if i.on.time < j.on.time {
-                return true
-            } else {
-                return false
+_fix_note_overlaps :: proc(cs: ^Cs_Corrector) {
+    for notes in cs.notes {
+        for i in 1 ..< len(notes) {
+            off0 := notes[i - 1].off
+            on1 := notes[i].on
+            if off0 != nil && on1 != nil && off0.time >= on1.time {
+                on0 := notes[i - 1].on
+                correct_time := on1.time - 1
+                if correct_time <= on0.time {
+                    correct_time = on0.time + 1
+                }
+                off0.time = correct_time
             }
-        })
+        }
     }
 }
 
-_sort_midi_events_by_time :: proc(cs: ^Cs_Corrector) {
+_sort_events_by_time :: proc(cs: ^Cs_Corrector) {
     slice.sort_by(cs.midi_events[:], proc(i, j: ^Midi_Event) -> bool {
         if i.time < j.time {
             return true
@@ -186,11 +143,31 @@ _sort_midi_events_by_time :: proc(cs: ^Cs_Corrector) {
     })
 }
 
-Note_On_Off_Pair :: struct {
+_clear_unused_notes :: proc(cs: ^Cs_Corrector) {
+    for notes, key in cs.notes {
+        keep_notes: [dynamic]^Note
+        for note in notes {
+            if note.off == nil || _event_still_exists(cs, note.off) {
+                append(&keep_notes, note)
+            }
+        }
+        delete(cs.notes[key])
+        cs.notes[key] = keep_notes
+    }
+}
+
+_event_still_exists :: proc(cs: ^Cs_Corrector, event: ^Midi_Event) -> bool {
+    for event_in_buffer in cs.midi_events {
+        if event == event_in_buffer {
+            return true
+        }
+    }
+    return false
+}
+
+Note :: struct {
     on: ^Midi_Event,
-    on_sent: bool,
     off: ^Midi_Event,
-    off_sent: bool,
 }
 
 Midi_Event :: struct {
