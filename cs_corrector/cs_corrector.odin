@@ -5,18 +5,16 @@ import "core:fmt"
 
 print: proc(text: string)
 
-KEY_COUNT :: 128
-
 Cs_Corrector :: struct {
     midi_events: [dynamic]^Midi_Event,
-    notes: [KEY_COUNT][dynamic]^Note,
-    last_note: [KEY_COUNT]^Note,
+    notes: [128][dynamic]^Note,
+    current_note: [128]^Note,
     held_key: Maybe(u8),
-    legato_first_delay: i32, // Freshly pressed key
-    legato_level0_delay: i32, // Lowest velocity legato
-    legato_level1_delay: i32,
-    legato_level2_delay: i32,
-    legato_level3_delay: i32, // Highest velocity legato
+    legato_first_delay: int, // Freshly pressed key
+    legato_level0_delay: int, // Lowest velocity legato
+    legato_level1_delay: int,
+    legato_level2_delay: int,
+    legato_level3_delay: int, // Highest velocity legato
 }
 
 destroy :: proc(cs: ^Cs_Corrector) {
@@ -32,19 +30,20 @@ destroy :: proc(cs: ^Cs_Corrector) {
     delete(cs.midi_events)
 }
 
-required_latency :: proc(cs: ^Cs_Corrector) -> u32 {
-    return u32(max(0, -min(
+required_latency :: proc(cs: ^Cs_Corrector) -> int {
+    return -min(
+        0,
         cs.legato_first_delay,
         cs.legato_level0_delay,
         cs.legato_level1_delay,
         cs.legato_level2_delay,
         cs.legato_level3_delay,
-    )))
+    )
 }
 
 process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
     event := new_clone(event)
-    delay := i32(0)
+    delay := 0
 
     #partial switch midi_message_kind(event.data) {
     case .Note_Off:
@@ -56,8 +55,9 @@ process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
         }
 
         // Finish the last note on this key
-        if cs.last_note[event_key] != nil {
-            cs.last_note[event_key].off = event
+        if cs.current_note[event_key] != nil {
+            cs.current_note[event_key].off = event
+            cs.current_note[event_key] = nil
         }
 
         print(fmt.aprintf("%v", cs.midi_events))
@@ -77,17 +77,21 @@ process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
         note := new(Note)
         note.on = event
         append(&cs.notes[event_key], note)
-        cs.last_note[event_key] = note
+        cs.current_note[event_key] = note
 
         print(fmt.aprintf("%v", cs.midi_events))
     }
 
-    event.time += u32(i32(required_latency(cs)) + delay)
+    event.time += required_latency(cs) + delay
+    if event.time < 0 {
+        event.time = 0
+    }
+
     append(&cs.midi_events, event)
 }
 
-push_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(event: Midi_Event)) {
-    _fix_note_overlaps(cs)
+push_events :: proc(cs: ^Cs_Corrector, frame_count: int, push_proc: proc(event: Midi_Event)) {
+    // _fix_note_overlaps(cs)
     _sort_events_by_time(cs)
 
     keep_events: [dynamic]^Midi_Event
@@ -95,7 +99,6 @@ push_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(event: 
     // Loop through events and push any that are inside the frame count
     for event in cs.midi_events {
         if event.time < frame_count {
-            // print(fmt.aprintf("%v", cs.notes))
             push_proc(event^)
             free(event)
         } else {
@@ -107,31 +110,38 @@ push_events :: proc(cs: ^Cs_Corrector, frame_count: u32, push_proc: proc(event: 
     cs.midi_events = keep_events
 
     _clear_unused_notes(cs)
-    _descrease_event_times(cs, frame_count)
+    _decrease_event_times(cs, frame_count)
 }
 
-_descrease_event_times :: proc(cs: ^Cs_Corrector, time: u32) {
+_decrease_event_times :: proc(cs: ^Cs_Corrector, time: int) {
     for event in cs.midi_events {
         event.time -= time
     }
 }
 
-_fix_note_overlaps :: proc(cs: ^Cs_Corrector) {
-    for notes in cs.notes {
-        for i in 1 ..< len(notes) {
-            off0 := notes[i - 1].off
-            on1 := notes[i].on
-            if off0 != nil && on1 != nil && off0.time >= on1.time {
-                on0 := notes[i - 1].on
-                correct_time := on1.time - 1
-                if correct_time <= on0.time {
-                    correct_time = on0.time + 1
-                }
-                off0.time = correct_time
-            }
-        }
-    }
-}
+// _fix_note_overlaps :: proc(cs: ^Cs_Corrector) {
+//     for notes in cs.notes {
+//         for i in 1 ..< len(notes) {
+//             prev_note := notes[i - 1]
+//             if _note_is_unused(cs, prev_note) {
+//                 continue
+//             }
+//             note := notes[i]
+//             if prev_note.off == nil || note.on == nil {
+//                 continue
+//             }
+//             if prev_note.off.time > note.on.time {
+//                 prev_note.off.time = note.on.time
+//             }
+//             if prev_note.on == nil {
+//                 continue
+//             }
+//             if prev_note.off.time < prev_note.on.time {
+//                 prev_note.off.time = prev_note.on.time
+//             }
+//         }
+//     }
+// }
 
 _sort_events_by_time :: proc(cs: ^Cs_Corrector) {
     slice.sort_by(cs.midi_events[:], proc(i, j: ^Midi_Event) -> bool {
@@ -147,7 +157,7 @@ _clear_unused_notes :: proc(cs: ^Cs_Corrector) {
     for notes, key in cs.notes {
         keep_notes: [dynamic]^Note
         for note in notes {
-            if note.off == nil || _event_still_exists(cs, note.off) {
+            if !_note_is_unused(cs, note) {
                 append(&keep_notes, note)
             }
         }
@@ -156,9 +166,28 @@ _clear_unused_notes :: proc(cs: ^Cs_Corrector) {
     }
 }
 
-_event_still_exists :: proc(cs: ^Cs_Corrector, event: ^Midi_Event) -> bool {
-    for event_in_buffer in cs.midi_events {
-        if event == event_in_buffer {
+_note_is_unused :: proc(cs: ^Cs_Corrector, note: ^Note) -> bool {
+    if note == nil {
+        return true
+    }
+    if note.on == nil {
+        return true
+    }
+    if note.off == nil && cs.current_note[midi_key(note.on.data)] != note {
+        return true
+    }
+    if note.off != nil && !_event_is_in_buffer(cs, note.off) {
+        return true
+    }
+    return false
+}
+
+_event_is_in_buffer :: proc(cs: ^Cs_Corrector, event: ^Midi_Event) -> bool {
+    if event == nil {
+        return false
+    }
+    for buffer_event in cs.midi_events {
+        if event == buffer_event {
             return true
         }
     }
@@ -171,7 +200,7 @@ Note :: struct {
 }
 
 Midi_Event :: struct {
-    time: u32,
+    time: int,
     data: Midi_Message,
 }
 
@@ -204,8 +233,8 @@ midi_message_kind :: proc(data: Midi_Message) -> Midi_Message_Kind {
     }
 }
 
-midi_channel :: proc(data: Midi_Message) -> u8 { return data[0] & 0x0F }
-midi_key :: proc(data: Midi_Message) -> u8 { return data[1] }
-midi_velocity :: proc(data: Midi_Message) -> u8 { return data[2] }
-midi_cc_number :: proc(data: Midi_Message) -> u8 { return data[1] }
-midi_cc_value :: proc(msg: Midi_Message) -> u8 { return msg[2] }
+midi_channel :: proc(data: Midi_Message) -> u8 { return min(15, data[0] & 0x0F) }
+midi_key :: proc(data: Midi_Message) -> u8 { return min(127, data[1]) }
+midi_velocity :: proc(data: Midi_Message) -> u8 { return min(127, data[2]) }
+midi_cc_number :: proc(data: Midi_Message) -> u8 { return min(127, data[1]) }
+midi_cc_value :: proc(data: Midi_Message) -> u8 { return min(127, data[2]) }

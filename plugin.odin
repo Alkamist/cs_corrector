@@ -49,8 +49,8 @@ Cs_Corrector_Context :: struct {
     out_events: ^clap.Output_Events,
 }
 
-millis_to_samples :: proc "c" (plugin: ^Plugin, seconds: f64) -> i32 {
-    return i32(plugin.sample_rate * seconds * 0.001)
+millis_to_samples :: proc "c" (plugin: ^Plugin, seconds: f64) -> int {
+    return int(plugin.sample_rate * seconds * 0.001)
 }
 
 push_midi_event_from_cs_corrector :: proc(event: cs.Midi_Event) {
@@ -142,12 +142,12 @@ plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Proce
 
     frame_count := clap_process.frames_count
     event_count := clap_process.in_events.size(clap_process.in_events)
-    event_index := u32(0)
-    next_event_index := u32(0)
+    event_index: u32 = 0
+    next_event_index: u32 = 0
     if event_count == 0 {
         next_event_index = frame_count
     }
-    frame := u32(0)
+    frame: u32 = 0
 
     parameters_sync_main_to_audio(plugin, clap_process.out_events)
 
@@ -173,7 +173,7 @@ plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Proce
                     event := (cast(^clap.Event_Midi)event_header)
                     if event.port_index == plugin.midi_port {
                         cs.process_event(&plugin.cs_corrector, cs.Midi_Event{
-                            time = event.header.time,
+                            time = int(event.header.time),
                             data = event.data,
                         })
                     }
@@ -196,7 +196,7 @@ plugin_process :: proc "c" (clap_plugin: ^clap.Plugin, clap_process: ^clap.Proce
         midi_port = plugin.midi_port,
         out_events = clap_process.out_events,
     }
-    cs.push_events(&plugin.cs_corrector, frame_count, push_midi_event_from_cs_corrector)
+    cs.push_events(&plugin.cs_corrector, int(frame_count), push_midi_event_from_cs_corrector)
 
     return .Continue
 }
