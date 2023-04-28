@@ -60,7 +60,8 @@ process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
             cs.current_note[event_key] = nil
         }
 
-        print(fmt.aprintf("%v", cs.midi_events))
+        // print(fmt.aprintf("%v", cs.notes[event_key]))
+        // print(fmt.aprintf("%v", cs.midi_events))
 
     case .Note_On:
         event_key := midi_key(event.data)
@@ -79,7 +80,8 @@ process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
         append(&cs.notes[event_key], note)
         cs.current_note[event_key] = note
 
-        print(fmt.aprintf("%v", cs.midi_events))
+        // print(fmt.aprintf("%v", cs.notes[event_key]))
+        // print(fmt.aprintf("%v", cs.midi_events))
     }
 
     event.time += required_latency(cs) + delay
@@ -91,7 +93,7 @@ process_event :: proc(cs: ^Cs_Corrector, event: Midi_Event) {
 }
 
 push_events :: proc(cs: ^Cs_Corrector, frame_count: int, push_proc: proc(event: Midi_Event)) {
-    // _fix_note_overlaps(cs)
+    _fix_note_overlaps(cs)
     _sort_events_by_time(cs)
 
     keep_events: [dynamic]^Midi_Event
@@ -119,29 +121,42 @@ _decrease_event_times :: proc(cs: ^Cs_Corrector, time: int) {
     }
 }
 
-// _fix_note_overlaps :: proc(cs: ^Cs_Corrector) {
-//     for notes in cs.notes {
-//         for i in 1 ..< len(notes) {
-//             prev_note := notes[i - 1]
-//             if _note_is_unused(cs, prev_note) {
-//                 continue
-//             }
-//             note := notes[i]
-//             if prev_note.off == nil || note.on == nil {
-//                 continue
-//             }
-//             if prev_note.off.time > note.on.time {
-//                 prev_note.off.time = note.on.time
-//             }
-//             if prev_note.on == nil {
-//                 continue
-//             }
-//             if prev_note.off.time < prev_note.on.time {
-//                 prev_note.off.time = prev_note.on.time
-//             }
-//         }
-//     }
-// }
+_fix_note_overlaps :: proc(cs: ^Cs_Corrector) {
+    _clear_unused_notes(cs)
+    _sort_notes_by_time(cs)
+    for notes in cs.notes {
+        for note in notes {
+            if _note_is_unused(cs, note) {
+                continue
+            }
+            print(fmt.aprintf("%v", note.on.time))
+        }
+        // for i in 1 ..< len(notes) {
+            // prev_note := notes[i - 1]
+            // note := notes[i]
+            // if prev_note.off == nil || note.on == nil {
+            //     continue
+            // }
+            // if prev_note.off.time > note.on.time {
+            //     print(fmt.aprintf("(%v, %v)", prev_note.off.time, note.on.time))
+            //     prev_note.off.time = note.on.time
+            //     print(fmt.aprintf("(%v, %v)", prev_note.off.time, note.on.time))
+            // }
+        // }
+    }
+}
+
+_sort_notes_by_time :: proc(cs: ^Cs_Corrector) {
+    for key in 0 ..< 128 {
+        slice.sort_by(cs.notes[key][:], proc(i, j: ^Note) -> bool {
+            if i.on.time < j.on.time {
+                return true
+            } else {
+                return false
+            }
+        })
+    }
+}
 
 _sort_events_by_time :: proc(cs: ^Cs_Corrector) {
     slice.sort_by(cs.midi_events[:], proc(i, j: ^Midi_Event) -> bool {
