@@ -28,12 +28,6 @@ Id :: u32
 Beat_Time :: i64
 Sec_Time :: i64
 
-write_string :: proc "c" (string_slot: []byte, value: string) {
-    n := copy(string_slot, value)
-    // enforce NUL termination
-    string_slot[min(n, len(string_slot) - 1)] = 0
-}
-
 version_is_compatible :: proc "c" (v: Version) -> bool {
     return v.major >= 1;
 }
@@ -163,6 +157,10 @@ Plugin_Gui :: struct{
     suggest_title: proc "c" (plugin: ^Plugin, title: cstring),
     show: proc "c" (plugin: ^Plugin) -> bool,
     hide: proc "c" (plugin: ^Plugin) -> bool,
+}
+
+Host_Latency :: struct {
+    changed: proc "c" (host: ^Host),
 }
 
 Plugin_Latency :: struct {

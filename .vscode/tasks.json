@@ -1,0 +1,24 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "odin: debug build",
+            "command": "odin",
+            "args": [
+                "build",
+                ".",
+                "-build-mode:dll",
+                "-out:bin/clap.clap",
+            ],
+            "options": {
+                "cwd": "${workspaceRoot}"
+            },
+            "type": "shell",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

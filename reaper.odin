@@ -4,7 +4,7 @@ import "clap"
 import "core:c"
 
 reaper_load_functions :: proc "c" (clap_host: ^clap.Host) {
-    reaper_plugin_info := cast(^Reaper_Plugin_Info)clap_host.get_extension(clap_host, "cockos.reaper_extension")
+    reaper_plugin_info := cast(^Reaper_Plugin_Info)clap_host->get_extension("cockos.reaper_extension")
     show_console_msg = cast(type_of(show_console_msg))reaper_plugin_info.get_func("ShowConsoleMsg")
 }
 

@@ -6,24 +6,62 @@ import "core:strconv"
 import "core:sync"
 import "core:runtime"
 
-Parameter_Id :: enum {
-    Delay,
+PARAMETER_COUNT :: len(Parameter)
+
+Parameter :: enum {
+    Legato_First_Note_Delay,
+    Legato_Portamento_Delay,
+    Legato_Slow_Delay,
+    Legato_Medium_Delay,
+    Legato_Fast_Delay,
 }
 
 parameter_info := [PARAMETER_COUNT]Parameter_Info{
     {
-        id = .Delay,
+        id = .Legato_First_Note_Delay,
         flags = {.Is_Automatable},
-        name = "Delay",
+        name = "Legato First Note Delay",
         module = "",
         min_value = -500.0,
         max_value = 500.0,
-        default_value = 0.0,
+        default_value = -60.0,
+    }, {
+        id = .Legato_Portamento_Delay,
+        flags = {.Is_Automatable},
+        name = "Legato Portamento Delay",
+        module = "",
+        min_value = -500.0,
+        max_value = 500.0,
+        default_value = -300.0,
+    }, {
+        id = .Legato_Slow_Delay,
+        flags = {.Is_Automatable},
+        name = "Legato Slow Delay",
+        module = "",
+        min_value = -500.0,
+        max_value = 500.0,
+        default_value = -300.0,
+    }, {
+        id = .Legato_Medium_Delay,
+        flags = {.Is_Automatable},
+        name = "Legato Medium Delay",
+        module = "",
+        min_value = -500.0,
+        max_value = 500.0,
+        default_value = -300.0,
+    }, {
+        id = .Legato_Fast_Delay,
+        flags = {.Is_Automatable},
+        name = "Legato Fast Delay",
+        module = "",
+        min_value = -500.0,
+        max_value = 500.0,
+        default_value = -150.0,
     },
 }
 
 Parameter_Info :: struct {
-    id: Parameter_Id,
+    id: Parameter,
     flags: bit_set[clap.Param_Info_Flags; clap.Id],
     name: string,
     module: string,
@@ -32,20 +70,12 @@ Parameter_Info :: struct {
     default_value: f64,
 }
 
-Parameter :: struct {
-    value: f64,
-    changed: bool,
-}
-
-PARAMETER_COUNT :: len(Parameter_Id)
-
-parameters_sync_main_to_audio :: proc "c" (plugin: ^Plugin, out_events: ^clap.Output_Events) {
-    sync.lock(&plugin.parameter_mutex)
-
+parameters_sync_main_to_audio :: proc "c" (instance: ^Plugin_Instance, out_events: ^clap.Output_Events) {
+    sync.lock(&instance.parameter_mutex)
     for i in 0 ..< PARAMETER_COUNT {
-        if plugin.parameters_main_thread[i].changed {
-            plugin.parameters_audio_thread[i].value = plugin.parameters_main_thread[i].value
-            plugin.parameters_main_thread[i].changed = false
+        if instance.main_thread_parameter_changed[i] {
+            instance.audio_thread_parameter_value[i] = instance.main_thread_parameter_value[i]
+            instance.main_thread_parameter_changed[i] = false
 
             event := clap.Event_Param_Value{
                 header = {
@@ -61,80 +91,68 @@ parameters_sync_main_to_audio :: proc "c" (plugin: ^Plugin, out_events: ^clap.Ou
                 port_index = -1,
                 channel = -1,
                 key = -1,
-                value = plugin.parameters_audio_thread[i].value,
+                value = instance.audio_thread_parameter_value[i],
             }
-            out_events.try_push(out_events, &event.header)
+            out_events->try_push(&event.header)
         }
     }
-
-    sync.unlock(&plugin.parameter_mutex)
+    sync.unlock(&instance.parameter_mutex)
 }
 
-parameters_sync_audio_to_main :: proc "c" (plugin: ^Plugin) {
-    sync.lock(&plugin.parameter_mutex)
-
+parameters_sync_audio_to_main :: proc "c" (instance: ^Plugin_Instance) {
+    sync.lock(&instance.parameter_mutex)
     for i in 0 ..< PARAMETER_COUNT {
-        if plugin.parameters_audio_thread[i].changed {
-            plugin.parameters_main_thread[i].value = plugin.parameters_audio_thread[i].value
-            plugin.parameters_audio_thread[i].changed = false
+        if instance.audio_thread_parameter_changed[i] {
+            instance.main_thread_parameter_value[i] = instance.audio_thread_parameter_value[i]
+            instance.audio_thread_parameter_changed[i] = false
         }
     }
-
-    sync.unlock(&plugin.parameter_mutex)
+    sync.unlock(&instance.parameter_mutex)
 }
 
 parameters_extension := clap.Plugin_Params{
-    count = proc "c" (clap_plugin: ^clap.Plugin) -> u32 {
-        return len(Parameter_Id)
+    count = proc "c" (plugin: ^clap.Plugin) -> u32 {
+        return len(Parameter)
     },
 
-    get_info = proc "c" (clap_plugin: ^clap.Plugin, param_index: u32, param_info: ^clap.Param_Info) -> bool {
+    get_info = proc "c" (plugin: ^clap.Plugin, param_index: u32, param_info: ^clap.Param_Info) -> bool {
         param_info.id = u32(parameter_info[param_index].id)
         param_info.flags = parameter_info[param_index].flags
-        clap.write_string(param_info.name[:], parameter_info[param_index].name)
-        clap.write_string(param_info.module[:], parameter_info[param_index].module)
+        write_string(param_info.name[:], parameter_info[param_index].name)
+        write_string(param_info.module[:], parameter_info[param_index].module)
         param_info.min_value = parameter_info[param_index].min_value
         param_info.max_value = parameter_info[param_index].max_value
         param_info.default_value = parameter_info[param_index].default_value
         return true
     },
 
-    get_value = proc "c" (clap_plugin: ^clap.Plugin, param_id: clap.Id, out_value: ^f64) -> bool {
-        plugin := get_plugin(clap_plugin)
-
-        sync.lock(&plugin.parameter_mutex)
-
-        if plugin.parameters_main_thread[param_id].changed {
-            out_value^ = plugin.parameters_main_thread[param_id].value
+    get_value = proc "c" (plugin: ^clap.Plugin, param_id: clap.Id, out_value: ^f64) -> bool {
+        instance := get_instance(plugin)
+        sync.lock(&instance.parameter_mutex)
+        if instance.main_thread_parameter_changed[param_id] {
+            out_value^ = instance.main_thread_parameter_value[param_id]
         } else {
-            out_value^ = plugin.parameters_audio_thread[param_id].value
+            out_value^ = instance.audio_thread_parameter_value[param_id]
         }
-
-        sync.unlock(&plugin.parameter_mutex)
-
+        sync.unlock(&instance.parameter_mutex)
         return true
     },
 
-    value_to_text = proc "c" (clap_plugin: ^clap.Plugin, param_id: clap.Id, value: f64, out_buffer: [^]byte, out_buffer_capacity: u32) -> bool {
+    value_to_text = proc "c" (plugin: ^clap.Plugin, param_id: clap.Id, value: f64, out_buffer: [^]byte, out_buffer_capacity: u32) -> bool {
         if PARAMETER_COUNT == 0 {
             return false
         }
-
         context = runtime.default_context()
-
         value_string := fmt.aprintf("%v", value)
-        clap.write_string(out_buffer[:out_buffer_capacity], value_string)
-
+        write_string(out_buffer[:out_buffer_capacity], value_string)
         return true
     },
 
-    text_to_value = proc "c" (clap_plugin: ^clap.Plugin, param_id: clap.Id, param_value_text: cstring, out_value: ^f64) -> bool {
+    text_to_value = proc "c" (plugin: ^clap.Plugin, param_id: clap.Id, param_value_text: cstring, out_value: ^f64) -> bool {
         if PARAMETER_COUNT == 0 {
             return false
         }
-
         context = runtime.default_context()
-
         value, ok := strconv.parse_f64(cast(string)param_value_text)
         if ok {
             out_value^ = value
@@ -144,23 +162,18 @@ parameters_extension := clap.Plugin_Params{
         }
     },
 
-    flush = proc "c" (clap_plugin: ^clap.Plugin, input: ^clap.Input_Events, output: ^clap.Output_Events) {
-        plugin := get_plugin(clap_plugin)
-        event_count := input.size(input)
-
-        parameters_sync_main_to_audio(plugin, output)
-
+    flush = proc "c" (plugin: ^clap.Plugin, input: ^clap.Input_Events, output: ^clap.Output_Events) {
+        instance := get_instance(plugin)
+        event_count := input->size()
+        parameters_sync_main_to_audio(instance, output)
         for i in 0 ..< event_count {
-            event_header := input.get(input, i)
+            event_header := input->get(i)
             if event_header.type == .Param_Value {
                 event := cast(^clap.Event_Param_Value)event_header
-
-                sync.lock(&plugin.parameter_mutex)
-
-                plugin.parameters_audio_thread[event.param_id].value = event.value
-                plugin.parameters_audio_thread[event.param_id].changed = true
-
-                sync.unlock(&plugin.parameter_mutex)
+                sync.lock(&instance.parameter_mutex)
+                instance.audio_thread_parameter_value[event.param_id] = event.value
+                instance.audio_thread_parameter_changed[event.param_id] = true
+                sync.unlock(&instance.parameter_mutex)
             }
         }
     },

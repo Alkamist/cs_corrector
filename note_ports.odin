@@ -1,6 +1,5 @@
 package main
 
-import "core:runtime"
 import "clap"
 
 note_ports_extension := clap.Plugin_Note_Ports{
@@ -12,7 +11,7 @@ note_ports_extension := clap.Plugin_Note_Ports{
         info.id = 0
         info.supported_dialects = {.Midi}
         info.preferred_dialect = {.Midi}
-        clap.write_string(info.name[:], "MIDI Port 1")
+        write_string(info.name[:], "MIDI Port 1")
         return true
     },
 }

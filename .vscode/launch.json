@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "lldb: debug",
+            "preLaunchTask": "odin: debug build",
+            "program": "C:/Program Files/REAPER (x64)/reaper",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+        }
+    ]
+}
