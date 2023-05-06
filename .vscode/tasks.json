@@ -7,8 +7,9 @@
             "args": [
                 "build",
                 ".",
+                "-debug",
                 "-build-mode:dll",
-                "-out:bin/clap.clap",
+                "-out:bin/cs_corrector.clap",
             ],
             "options": {
                 "cwd": "${workspaceRoot}"
