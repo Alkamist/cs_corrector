@@ -23,7 +23,7 @@ Note_Event :: struct {
 }
 
 State :: struct {
-    notes: [KEY_COUNT][dynamic]^Note,
+    notes: [KEY_COUNT][dynamic]Note,
     held_key: Maybe(int),
     legato_first_note_delay: int,
     legato_portamento_delay: int,
@@ -43,7 +43,7 @@ reset :: proc(state: ^State) {
     state.held_key = nil
     for key in 0 ..< KEY_COUNT {
         _free_notes(state, key)
-        delete(state.notes[key])
+        resize(&state.notes[key], 0)
     }
 }
 
@@ -84,10 +84,7 @@ process_note_on :: proc(state: ^State, time, key, velocity: int) {
     note_event.key = key
     note_event.velocity = velocity
 
-    note := new(Note)
-    note.on = note_event
-
-    append(&state.notes[key], note)
+    append(&state.notes[key], Note{on = note_event})
 }
 
 process_note_off :: proc(state: ^State, time, key, velocity: int) {
@@ -98,15 +95,15 @@ process_note_off :: proc(state: ^State, time, key, velocity: int) {
     }
 
     // Add a note off to the first incomplete note
-    for i in 0 ..< len(state.notes[key]) {
-        _, note_is_complete := state.notes[key][i].off.?
+    for note in &state.notes[key] {
+        _, note_is_complete := note.off.?
         if !note_is_complete {
             note_event := new(Note_Event)
             note_event.kind = .Off
             note_event.time = time + required_latency(state)
             note_event.key = key
             note_event.velocity = velocity
-            state.notes[key][i].off = note_event
+            note.off = note_event
             break
         }
     }
@@ -126,9 +123,11 @@ extract_note_events :: proc(state: ^State, frame_count: int) -> (result: [dynami
             break
         }
     }
+
     _remove_sent_notes(state)
-    // _fix_note_overlaps(state)
-    // _decrease_event_times(state, frame_count)
+    _fix_note_overlaps(state)
+    _decrease_event_times(state, frame_count)
+
     return
 }
 
@@ -143,27 +142,32 @@ _decrease_event_times :: proc(state: ^State, frame_count: int) {
     }
 }
 
-// proc fixNoteOverlaps(state: ^State) =
-//   for key in 0 ..< keyCount:
-//     var sortedNotes = state.notes[key]
+_fix_note_overlaps :: proc(state: ^State) {
+    for key in 0 ..< KEY_COUNT {
+        sorted_notes := _get_sorted_notes(state, key)
+        defer delete(sorted_notes)
 
-//     sortedNotes.sort do (x, y: Note) -> int:
-//       cmp(x.on.time, y.on.time)
+        for i in 1 ..< len(sorted_notes) {
+            prev_note := sorted_notes[i - 1]
+            note := sorted_notes[i]
 
-//     for i in 1 ..< sortedNotes.len:
-//       var prevNote = sortedNotes[i - 1]
-//       var note = sortedNotes[i]
-//       if prevNote.off.isSome and prevNote.off.get.time > note.on.time:
-//         prevNote.off.get.time = note.on.time
-//         if prevNote.off.get.time < prevNote.on.time:
-//           prevNote.off.get.time = prevNote.on.time
+            if prev_note_off, ok := prev_note.off.?; ok {
+                if prev_note_off.time > note.on.time {
+                    prev_note_off.time = note.on.time
+                    if prev_note_off.time < prev_note.on.time {
+                        prev_note_off.time = prev_note.on.time
+                    }
+                }
+            }
+        }
+    }
+}
 
 _remove_sent_notes :: proc(state: ^State) {
     for key in 0 ..< KEY_COUNT {
-        keep_notes: [dynamic]^Note
-        defer delete(keep_notes)
+        keep_notes: [dynamic]Note
 
-        for note in state.notes[key] {
+        for note in &state.notes[key] {
             if _note_is_sent(note) {
                 _free_note(note)
             } else {
@@ -171,21 +175,37 @@ _remove_sent_notes :: proc(state: ^State) {
             }
         }
 
+        delete(state.notes[key])
         state.notes[key] = keep_notes
     }
 }
 
-_get_sorted_note_events :: proc(state: ^State) -> (events: [dynamic]^Note_Event) {
+_get_sorted_notes :: proc(state: ^State, key: int) -> (result: [dynamic]Note) {
+    result = make([dynamic]Note, len(state.notes[key]))
+    for note, i in state.notes[key] {
+        result[i] = note
+    }
+    slice.sort_by(result[:], proc(i, j: Note) -> bool {
+        if i.on.time < j.on.time {
+            return true
+        } else {
+            return false
+        }
+    })
+    return
+}
+
+_get_sorted_note_events :: proc(state: ^State) -> (result: [dynamic]^Note_Event) {
     for key in 0 ..< KEY_COUNT {
         for note in state.notes[key] {
-            append(&events, note.on)
+            append(&result, note.on)
             note_off, note_off_exists := note.off.?
             if note_off_exists {
-                append(&events, note_off)
+                append(&result, note_off)
             }
         }
     }
-    slice.sort_by(events[:], proc(i, j: ^Note_Event) -> bool {
+    slice.sort_by(result[:], proc(i, j: ^Note_Event) -> bool {
         if i.time < j.time {
             return true
         } else {
@@ -195,17 +215,16 @@ _get_sorted_note_events :: proc(state: ^State) -> (events: [dynamic]^Note_Event)
     return
 }
 
-_note_is_sent :: proc(note: ^Note) -> bool {
+_note_is_sent :: proc(note: Note) -> bool {
     note_off, note_off_exists := note.off.?
     return note_off_exists && note_off.is_sent
 }
 
-_free_note :: proc(note: ^Note) {
+_free_note :: proc(note: Note) {
     free(note.on)
-    if note_off, note_off_exists := note.off.?; note_off_exists {
+    if note_off, ok := note.off.?; ok {
         free(note_off)
     }
-    free(note)
 }
 
 _free_notes :: proc(state: ^State, key: int) {

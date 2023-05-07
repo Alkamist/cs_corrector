@@ -70,6 +70,10 @@ Parameter_Info :: struct {
     default_value: f64,
 }
 
+parameter :: proc "c" (instance: ^Plugin_Instance, id: Parameter) -> f64 {
+    return instance.audio_thread_parameter_value[id]
+}
+
 parameters_sync_main_to_audio :: proc "c" (instance: ^Plugin_Instance, out_events: ^clap.Output_Events) {
     sync.lock(&instance.parameter_mutex)
     for i in 0 ..< PARAMETER_COUNT {

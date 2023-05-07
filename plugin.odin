@@ -37,7 +37,20 @@ Plugin_Instance :: struct {
     timer_id_to_proc: map[clap.Id]proc(instance: ^Plugin_Instance),
 }
 
-cs_corrector_encode_midi_message :: proc(msg: ^cs.Note_Event) -> midi.Encoded_Message {
+millis_to_samples :: proc(instance: ^Plugin_Instance, millis: f64) -> int {
+    return int(instance.sample_rate * millis * 0.001)
+}
+
+cs_corrector_update_parameters :: proc(instance: ^Plugin_Instance) {
+    instance.cs_corrector.legato_first_note_delay = millis_to_samples(instance, parameter(instance, .Legato_First_Note_Delay))
+    instance.cs_corrector.legato_portamento_delay = millis_to_samples(instance, parameter(instance, .Legato_Portamento_Delay))
+    instance.cs_corrector.legato_slow_delay = millis_to_samples(instance, parameter(instance, .Legato_Slow_Delay))
+    instance.cs_corrector.legato_medium_delay = millis_to_samples(instance, parameter(instance, .Legato_Medium_Delay))
+    instance.cs_corrector.legato_fast_delay = millis_to_samples(instance, parameter(instance, .Legato_Fast_Delay))
+    set_latency(instance, cs.required_latency(&instance.cs_corrector))
+}
+
+cs_corrector_encode_midi_message :: proc(msg: cs.Note_Event) -> midi.Encoded_Message {
     kind: midi.Note_Message_Kind
     switch msg.kind {
     case .On: kind = .On
@@ -82,21 +95,25 @@ on_process :: proc(instance: ^Plugin_Instance, process: ^clap.Process) {
     note_events := cs.extract_note_events(&instance.cs_corrector, frame_count)
     defer delete(note_events)
 
-    // for event in note_events {
-    //     clap_event := clap.Event_Midi{
-    //         header = {
-    //             size = size_of(clap.Event_Midi),
-    //             time = u32(event.time),
-    //             space_id = clap.CORE_EVENT_SPACE_ID,
-    //             type = .Midi,
-    //             flags = 0,
-    //         },
-    //         port_index = u16(instance.midi_port),
-    //         data = cs_corrector_encode_midi_message(event),
-    //     }
-    //     process.out_events->try_push(&clap_event.header)
-    // }
+    for event in note_events {
+        clap_event := clap.Event_Midi{
+            header = {
+                size = size_of(clap.Event_Midi),
+                time = u32(event.time - instance.latency),
+                space_id = clap.CORE_EVENT_SPACE_ID,
+                type = .Midi,
+                flags = 0,
+            },
+            port_index = u16(instance.midi_port),
+            data = cs_corrector_encode_midi_message(event),
+        }
+        process.out_events->try_push(&clap_event.header)
+    }
 }
+
+// on_parameter_value_change ::  proc(instance: ^Plugin_Instance) {
+
+// }
 
 instance_init :: proc "c" (plugin: ^clap.Plugin) -> bool {
     context = runtime.default_context()
@@ -124,10 +141,11 @@ instance_destroy :: proc "c" (plugin: ^clap.Plugin) {
 }
 
 instance_activate :: proc "c" (plugin: ^clap.Plugin, sample_rate: f64, min_frames_count, max_frames_count: u32) -> bool {
+    context = runtime.default_context()
     instance := get_instance(plugin)
-    instance.is_active = true
     instance.sample_rate = sample_rate
-    instance.latency = 0
+    cs_corrector_update_parameters(instance)
+    instance.is_active = true
     return true
 }
 
@@ -135,7 +153,6 @@ instance_deactivate :: proc "c" (plugin: ^clap.Plugin) {
     context = runtime.default_context()
     instance := get_instance(plugin)
     instance.is_active = false
-    cs.reset(&instance.cs_corrector)
 }
 
 instance_start_processing :: proc "c" (plugin: ^clap.Plugin) -> bool {
