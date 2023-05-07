@@ -22,6 +22,7 @@ plugin_descriptor := clap.Plugin_Descriptor{
 
 Plugin_Instance :: struct {
     is_active: bool,
+    is_playing: bool,
     sample_rate: f64,
     midi_port: int,
     latency: int,
@@ -65,7 +66,7 @@ cs_corrector_encode_midi_message :: proc(msg: cs.Note_Event) -> midi.Encoded_Mes
 }
 
 on_midi_event :: proc(instance: ^Plugin_Instance, process: ^clap.Process, event: ^clap.Event_Midi) {
-    if event.port_index == u16(instance.midi_port) {
+    if instance.is_playing && event.port_index == u16(instance.midi_port) {
         note_message, ok := midi.decode_note_message(event.data)
         if ok {
             switch note_message.kind {
@@ -87,6 +88,10 @@ on_midi_event :: proc(instance: ^Plugin_Instance, process: ^clap.Process, event:
         } else {
             process.out_events->try_push(&event.header)
         }
+    } else {
+        event := event
+        event.header.time -= u32(instance.latency)
+        process.out_events->try_push(&event.header)
     }
 }
 
@@ -110,10 +115,6 @@ on_process :: proc(instance: ^Plugin_Instance, process: ^clap.Process) {
         process.out_events->try_push(&clap_event.header)
     }
 }
-
-// on_parameter_value_change ::  proc(instance: ^Plugin_Instance) {
-
-// }
 
 instance_init :: proc "c" (plugin: ^clap.Plugin) -> bool {
     context = runtime.default_context()
@@ -183,6 +184,16 @@ instance_process :: proc "c" (plugin: ^clap.Plugin, process: ^clap.Process) -> c
 
     parameters_sync_main_to_audio(instance, process.out_events)
 
+    transport_event := process.transport
+    if transport_event != nil {
+        if .Is_Playing in transport_event.flags {
+            instance.is_playing = true
+        } else {
+            instance.is_playing = false
+            cs.reset(&instance.cs_corrector)
+        }
+    }
+
     for frame < frame_count {
         for event_index < event_count && next_event_index == frame {
             event_header := process.in_events->get(event_index)
@@ -200,6 +211,7 @@ instance_process :: proc "c" (plugin: ^clap.Plugin, process: ^clap.Process) -> c
                     instance.audio_thread_parameter_value[event.param_id] = event.value
                     instance.audio_thread_parameter_changed[event.param_id] = true
                     sync.unlock(&instance.parameter_mutex)
+                    cs_corrector_update_parameters(instance)
 
                 case .Midi:
                     event := (cast(^clap.Event_Midi)event_header)

@@ -80,9 +80,20 @@ Event_Midi :: struct {
     data: [3]u8,
 }
 
+Transport_Event_Flags :: enum {
+    Has_Tempo,
+    Has_Beats_Timeline,
+    Has_Seconds_Timeline,
+    Has_Time_Signature,
+    Is_Playing,
+    Is_Recording,
+    Is_Loop_Active,
+    Is_Within_Pre_Roll,
+}
+
 Event_Transport :: struct {
     header: Event_Header,
-    flags: u32,
+    flags: bit_set[Transport_Event_Flags; u32],
     song_pos_beats: Beat_Time,
     song_pos_seconds: Sec_Time,
     tempo: f64,

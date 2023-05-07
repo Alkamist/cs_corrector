@@ -167,6 +167,7 @@ parameters_extension := clap.Plugin_Params{
     },
 
     flush = proc "c" (plugin: ^clap.Plugin, input: ^clap.Input_Events, output: ^clap.Output_Events) {
+        context = runtime.default_context()
         instance := get_instance(plugin)
         event_count := input->size()
         parameters_sync_main_to_audio(instance, output)
@@ -178,6 +179,7 @@ parameters_extension := clap.Plugin_Params{
                 instance.audio_thread_parameter_value[event.param_id] = event.value
                 instance.audio_thread_parameter_changed[event.param_id] = true
                 sync.unlock(&instance.parameter_mutex)
+                cs_corrector_update_parameters(instance)
             }
         }
     },
