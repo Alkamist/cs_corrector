@@ -25,6 +25,7 @@ Note_Event :: struct {
 State :: struct {
     notes: [KEY_COUNT][dynamic]Note,
     held_key: Maybe(int),
+    hold_pedal_is_held: bool,
     legato_first_note_delay: int,
     legato_portamento_delay: int,
     legato_slow_delay: int,
@@ -58,11 +59,15 @@ required_latency :: proc(state: ^State) -> int {
     ) * 2
 }
 
+process_hold_pedal :: proc(state: ^State, is_held: bool) {
+    state.hold_pedal_is_held = is_held
+}
+
 process_note_on :: proc(state: ^State, time, key, velocity: int) {
     delay := 0
     _, key_is_held := state.held_key.?
 
-    if key_is_held {
+    if state.hold_pedal_is_held || key_is_held {
         if velocity <= 20 {
             delay = state.legato_portamento_delay
         } else if velocity > 20 && velocity <= 64 {

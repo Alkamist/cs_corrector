@@ -6,7 +6,6 @@ import "core:sync"
 import "core:slice"
 import "core:strings"
 import "clap"
-import "midi"
 import cs "cs_corrector"
 
 plugin_descriptor := clap.Plugin_Descriptor{
@@ -24,7 +23,6 @@ Plugin_Instance :: struct {
     is_active: bool,
     is_playing: bool,
     sample_rate: f64,
-    midi_port: int,
     latency: int,
     cs_corrector: cs.State,
     clap_host: ^clap.Host,
@@ -51,48 +49,66 @@ cs_corrector_update_parameters :: proc(instance: ^Plugin_Instance) {
     set_latency(instance, cs.required_latency(&instance.cs_corrector))
 }
 
-cs_corrector_encode_midi_message :: proc(msg: cs.Note_Event) -> midi.Encoded_Message {
-    kind: midi.Note_Message_Kind
+cs_corrector_encode_midi_message :: proc(msg: cs.Note_Event) -> [3]u8 {
+    channel := 0
+    status := channel
     switch msg.kind {
-    case .On: kind = .On
-    case .Off: kind = .Off
+    case .Off: status += 0x80
+    case .On: status += 0x90
     }
-    return midi.encode_note_message(midi.Note_Message{
-        kind = kind,
-        channel = 0,
-        key = msg.key,
-        velocity = msg.velocity,
-    })
+    return {
+        u8(status),
+        u8(msg.key),
+        u8(msg.velocity),
+    }
 }
 
 on_midi_event :: proc(instance: ^Plugin_Instance, process: ^clap.Process, event: ^clap.Event_Midi) {
-    if instance.is_playing && event.port_index == u16(instance.midi_port) {
-        note_message, ok := midi.decode_note_message(event.data)
-        if ok {
-            switch note_message.kind {
-            case .Off:
-                cs.process_note_off(
-                    &instance.cs_corrector,
-                    int(event.header.time),
-                    note_message.key,
-                    note_message.velocity,
-                )
-            case .On:
-                cs.process_note_on(
-                    &instance.cs_corrector,
-                    int(event.header.time),
-                    note_message.key,
-                    note_message.velocity,
-                )
-            }
-        } else {
-            process.out_events->try_push(&event.header)
-        }
-    } else {
-        event := event
+    event := event
+
+    // Don't process when project is not playing back so there isn't
+    // an annoying delay when drawing notes on the piano roll
+    if !instance.is_playing {
         event.header.time -= u32(instance.latency)
         process.out_events->try_push(&event.header)
+        return
     }
+
+    msg := event.data
+    status_code := msg[0] & 0xF0
+
+    is_note_off := status_code == 0x80
+    if is_note_off {
+        cs.process_note_off(
+            &instance.cs_corrector,
+            int(event.header.time),
+            int(msg[1]),
+            int(msg[2]),
+        )
+        return
+    }
+
+    is_note_on := status_code == 0x90
+    if is_note_on {
+        cs.process_note_on(
+            &instance.cs_corrector,
+            int(event.header.time),
+            int(msg[1]),
+            int(msg[2]),
+        )
+        return
+    }
+
+    is_cc := status_code == 0xB0
+    is_hold_pedal := is_cc && msg[1] == 64
+    if is_hold_pedal {
+        is_held := msg[2] > 63
+        cs.process_hold_pedal(&instance.cs_corrector, is_held)
+        // Don't return because we need to send the hold pedal information
+    }
+
+    // Pass any events that aren't note on or off straight to the host
+    process.out_events->try_push(&event.header)
 }
 
 on_process :: proc(instance: ^Plugin_Instance, process: ^clap.Process) {
@@ -109,7 +125,7 @@ on_process :: proc(instance: ^Plugin_Instance, process: ^clap.Process) {
                 type = .Midi,
                 flags = 0,
             },
-            port_index = u16(instance.midi_port),
+            port_index = 0,
             data = cs_corrector_encode_midi_message(event),
         }
         process.out_events->try_push(&clap_event.header)
