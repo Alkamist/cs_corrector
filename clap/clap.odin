@@ -10,6 +10,7 @@ EXT_NOTE_PORTS :: "clap.note-ports"
 EXT_LATENCY :: "clap.latency"
 EXT_PARAMS :: "clap.params"
 EXT_TIMER_SUPPORT :: "clap.timer-support"
+EXT_STATE :: "clap.state"
 EXT_GUI :: "clap.gui"
 
 WINDOW_API_WIN32 :: "win32"
@@ -200,6 +201,21 @@ Note_Port_Info :: struct {
 Plugin_Note_Ports :: struct {
     count: proc "c" (plugin: ^Plugin, is_input: bool) -> u32,
     get: proc "c" (plugin: ^Plugin, index: u32, is_input: bool, info: ^Note_Port_Info) -> bool,
+}
+
+I_Stream :: struct {
+    ctx: rawptr,
+    read: proc "c" (stream: ^I_Stream, buffer: rawptr, size: u64) -> i64,
+}
+
+O_Stream :: struct {
+    ctx: rawptr,
+    write: proc "c" (stream: ^O_Stream, buffer: rawptr, size: u64) -> i64,
+}
+
+Plugin_State :: struct {
+    save: proc "c" (plugin: ^Plugin, stream: ^O_Stream) -> bool,
+    load: proc "c" (plugin: ^Plugin, stream: ^I_Stream) -> bool,
 }
 
 Param_Info_Flags :: enum u32 {

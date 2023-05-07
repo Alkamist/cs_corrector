@@ -241,6 +241,7 @@ instance_get_extension :: proc "c" (plugin: ^clap.Plugin, id: cstring) -> rawptr
     case clap.EXT_LATENCY: return &latency_extension
     case clap.EXT_PARAMS: return &parameters_extension
     case clap.EXT_TIMER_SUPPORT: return &timer_extension
+    case clap.EXT_STATE: return &state_extension
     // case clap.EXT_GUI: return &gui_extension
     case: return nil
     }
