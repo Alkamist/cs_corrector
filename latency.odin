@@ -4,10 +4,14 @@ import "clap"
 
 set_latency :: proc(instance: ^Plugin_Instance, value: int) {
     instance.latency = value
+    if instance.clap_host_latency == nil ||
+       instance.clap_host_latency.changed == nil ||
+       instance.clap_host.request_restart == nil {
+        return
+    }
 
     // Inform the host of the latency change.
-    host_latency := cast(^clap.Host_Latency)(instance.clap_host->get_extension(clap.EXT_LATENCY))
-    host_latency.changed(instance.clap_host)
+    instance.clap_host_latency.changed(instance.clap_host)
     if instance.is_active {
         instance.clap_host->request_restart()
     }

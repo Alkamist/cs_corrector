@@ -12,6 +12,7 @@ EXT_PARAMS :: "clap.params"
 EXT_TIMER_SUPPORT :: "clap.timer-support"
 EXT_STATE :: "clap.state"
 EXT_GUI :: "clap.gui"
+EXT_LOG :: "clap.log"
 
 WINDOW_API_WIN32 :: "win32"
 WINDOW_API_COCOA :: "cocoa"
@@ -24,6 +25,46 @@ when ODIN_OS == .Windows {
 } else when ODIN_OS == .Linux {
 	WINDOW_API :: WINDOW_API_X11
 }
+
+PLUGIN_FEATURE_INSTRUMENT :: "instrument"
+PLUGIN_FEATURE_AUDIO_EFFECT :: "audio-effect"
+PLUGIN_FEATURE_NOTE_EFFECT :: "note-effect"
+PLUGIN_FEATURE_NOTE_DETECTOR :: "note-detector"
+PLUGIN_FEATURE_ANALYZER :: "analyzer"
+PLUGIN_FEATURE_SYNTHESIZER :: "synthesizer"
+PLUGIN_FEATURE_SAMPLER :: "sampler"
+PLUGIN_FEATURE_DRUM :: "drum"
+PLUGIN_FEATURE_DRUM_MACHINE :: "drum-machine"
+PLUGIN_FEATURE_FILTER :: "filter"
+PLUGIN_FEATURE_PHASER :: "phaser"
+PLUGIN_FEATURE_EQUALIZER :: "equalizer"
+PLUGIN_FEATURE_DEESSER :: "de-esser"
+PLUGIN_FEATURE_PHASE_VOCODER :: "phase-vocoder"
+PLUGIN_FEATURE_GRANULAR :: "granular"
+PLUGIN_FEATURE_FREQUENCY_SHIFTER :: "frequency-shifter"
+PLUGIN_FEATURE_PITCH_SHIFTER :: "pitch-shifter"
+PLUGIN_FEATURE_DISTORTION :: "distortion"
+PLUGIN_FEATURE_TRANSIENT_SHAPER :: "transient-shaper"
+PLUGIN_FEATURE_COMPRESSOR :: "compressor"
+PLUGIN_FEATURE_EXPANDER :: "expander"
+PLUGIN_FEATURE_GATE :: "gate"
+PLUGIN_FEATURE_LIMITER :: "limiter"
+PLUGIN_FEATURE_FLANGER :: "flanger"
+PLUGIN_FEATURE_CHORUS :: "chorus"
+PLUGIN_FEATURE_DELAY :: "delay"
+PLUGIN_FEATURE_REVERB :: "reverb"
+PLUGIN_FEATURE_TREMOLO :: "tremolo"
+PLUGIN_FEATURE_GLITCH :: "glitch"
+PLUGIN_FEATURE_UTILITY :: "utility"
+PLUGIN_FEATURE_PITCH_CORRECTION :: "pitch-correction"
+PLUGIN_FEATURE_RESTORATION :: "restoration"
+PLUGIN_FEATURE_MULTI_EFFECTS :: "multi-effects"
+PLUGIN_FEATURE_MIXING :: "mixing"
+PLUGIN_FEATURE_MASTERING :: "mastering"
+PLUGIN_FEATURE_MONO :: "mono"
+PLUGIN_FEATURE_STEREO :: "stereo"
+PLUGIN_FEATURE_SURROUND :: "surround"
+PLUGIN_FEATURE_AMBISONIC :: "ambisonic"
 
 Id :: u32
 Beat_Time :: i64
@@ -216,6 +257,20 @@ O_Stream :: struct {
 Plugin_State :: struct {
     save: proc "c" (plugin: ^Plugin, stream: ^O_Stream) -> bool,
     load: proc "c" (plugin: ^Plugin, stream: ^I_Stream) -> bool,
+}
+
+Log_Severity :: enum {
+    Debug,
+    Info,
+    Warning,
+    Error,
+    Fatal,
+    Host_Misbehaving,
+    Plugin_Misbehaving,
+}
+
+Host_Log :: struct {
+    log: proc "c" (host: ^Host, severity: Log_Severity, msg: cstring),
 }
 
 Param_Info_Flags :: enum u32 {

@@ -4,18 +4,24 @@ import "core:runtime"
 import "clap"
 
 register_timer :: proc(instance: ^Plugin_Instance, name: string, period_ms: int, timer_proc: proc(instance: ^Plugin_Instance)) {
+    if instance.clap_host_timer_support == nil ||
+       instance.clap_host_timer_support.register_timer == nil {
+        return
+    }
     id: clap.Id
-    host_timer_support := cast(^clap.Host_Timer_Support)instance.clap_host->get_extension(clap.EXT_TIMER_SUPPORT)
-    host_timer_support.register_timer(instance.clap_host, u32(period_ms), &id)
+    instance.clap_host_timer_support.register_timer(instance.clap_host, u32(period_ms), &id)
     instance.timer_name_to_id[name] = id
     instance.timer_id_to_proc[id] = timer_proc
 }
 
 unregister_timer :: proc(instance: ^Plugin_Instance, name: string) {
+    if instance.clap_host_timer_support == nil ||
+       instance.clap_host_timer_support.unregister_timer == nil {
+        return
+    }
     if id, ok := instance.timer_name_to_id[name]; ok {
         id := instance.timer_name_to_id[name]
-        host_timer_support := cast(^clap.Host_Timer_Support)instance.clap_host->get_extension(clap.EXT_TIMER_SUPPORT)
-        host_timer_support.unregister_timer(instance.clap_host, id)
+        instance.clap_host_timer_support.unregister_timer(instance.clap_host, id)
         instance.timer_id_to_proc[id] = nil
     }
 }

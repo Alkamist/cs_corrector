@@ -8,15 +8,19 @@ import "core:strings"
 import "clap"
 import cs "cs_corrector"
 
+CLAP_VERSION :: clap.Version{1, 1, 8}
+
 plugin_descriptor := clap.Plugin_Descriptor{
-    id = "com.alkamist.cs_corrector",
+    clap_version = CLAP_VERSION,
+    id = "com.alkamist.CsCorrector",
     name = "Cs Corrector",
     vendor = "Alkamist Audio",
     url = "",
     manual_url = "",
     support_url = "",
     version = "0.1.0",
-    description = "",
+    description = "A MIDI timing corrector for Cinematic Studios libraries.",
+    features = raw_data([]cstring{clap.PLUGIN_FEATURE_NOTE_EFFECT, clap.PLUGIN_FEATURE_UTILITY, nil}),
 }
 
 Plugin_Instance :: struct {
@@ -26,6 +30,9 @@ Plugin_Instance :: struct {
     latency: int,
     cs_corrector: cs.State,
     clap_host: ^clap.Host,
+    clap_host_log: ^clap.Host_Log,
+    clap_host_timer_support: ^clap.Host_Timer_Support,
+    clap_host_latency: ^clap.Host_Latency,
     clap_plugin: clap.Plugin,
     main_thread_parameter_value: [PARAMETER_COUNT]f64,
     main_thread_parameter_changed: [PARAMETER_COUNT]bool,
@@ -136,6 +143,10 @@ instance_init :: proc "c" (plugin: ^clap.Plugin) -> bool {
     context = runtime.default_context()
     instance := get_instance(plugin)
 
+    instance.clap_host_log = cast(^clap.Host_Log)(instance.clap_host->get_extension(clap.EXT_LOG))
+    instance.clap_host_timer_support = cast(^clap.Host_Timer_Support)instance.clap_host->get_extension(clap.EXT_TIMER_SUPPORT)
+    instance.clap_host_latency = cast(^clap.Host_Latency)(instance.clap_host->get_extension(clap.EXT_LATENCY))
+
     for parameter in Parameter {
         instance.audio_thread_parameter_value[parameter] = parameter_info[parameter].default_value
         instance.main_thread_parameter_value[parameter] = parameter_info[parameter].default_value
@@ -199,6 +210,8 @@ instance_process :: proc "c" (plugin: ^clap.Plugin, process: ^clap.Process) -> c
     frame: u32 = 0
 
     parameters_sync_main_to_audio(instance, process.out_events)
+
+    log(instance, .Debug, "Yee")
 
     transport_event := process.transport
     if transport_event != nil {

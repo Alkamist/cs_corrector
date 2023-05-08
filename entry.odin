@@ -37,7 +37,7 @@ plugin_factory := clap.Plugin_Factory{
         if !clap.version_is_compatible(host.clap_version) {
             return nil
         }
-        reaper_load_functions(host)
+        // reaper_load_functions(host)
         if plugin_id == plugin_descriptor.id {
             return create_instance(host)
         }
@@ -47,7 +47,7 @@ plugin_factory := clap.Plugin_Factory{
 
 @export
 clap_entry := clap.Plugin_Entry{
-	clap_version = clap.Version{1, 1, 7},
+	clap_version = CLAP_VERSION,
 
 	init = proc "c" (plugin_path: cstring) -> bool {
         return true
