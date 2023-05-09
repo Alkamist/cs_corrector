@@ -50,24 +50,47 @@ on_create :: proc(plugin: ^Audio_Plugin) {
 on_destroy :: proc(plugin: ^Audio_Plugin) {
     unregister_timer(plugin, "Debug_Timer")
     strings.builder_destroy(&plugin.debug_string_builder)
+    free_notes(plugin)
+}
+
+on_reset :: proc(plugin: ^Audio_Plugin) {
+    reset_notes(plugin)
 }
 
 on_parameter_event :: proc(plugin: ^Audio_Plugin, event: Parameter_Event) {
+    switch event.id {
+    case .Legato_First_Note_Delay ..= .Legato_Fast_Delay:
+        set_latency(plugin, required_latency(plugin))
+    }
 }
 
 on_transport_event :: proc(plugin: ^Audio_Plugin, event: Transport_Event) {
-    // msg := fmt.aprint(event)
-    // defer delete(msg)
-    // debug(plugin, fmt.aprint(event))
+    if .Is_Playing in event.flags {
+        plugin.was_playing = plugin.is_playing
+        plugin.is_playing = true
+    } else {
+        plugin.was_playing = plugin.is_playing
+        plugin.is_playing = false
+        // Reset the CsCorrector notes on playback stop
+        if plugin.was_playing && !plugin.is_playing {
+            reset_notes(plugin)
+        }
+    }
 }
 
 on_midi_event :: proc(plugin: ^Audio_Plugin, event: Midi_Event) {
-    // msg := fmt.aprint(event)
-    // defer delete(msg)
-    // debug(plugin, fmt.aprint(event))
+    process_midi_event(plugin, event)
 }
 
 on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
+    send_note_events(plugin, frame_count)
+    // for key in 0 ..< KEY_COUNT {
+    //     if len(plugin.notes[key]) > 0 {
+    //         msg := fmt.aprint(plugin.notes[key])
+    //         defer delete(msg)
+    //         debug(plugin, msg)
+    //     }
+    // }
 }
 
 debug :: proc(plugin: ^Audio_Plugin, msg: string) {

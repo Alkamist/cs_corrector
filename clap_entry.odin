@@ -19,11 +19,11 @@ clap_plugin_factory := Clap_Plugin_Factory{
             return nil
         }
         if plugin_id == clap_plugin_descriptor.id {
-            instance := new(Audio_Plugin)
-            instance.clap_host = host
-            instance.clap_plugin = {
+            plugin := new(Audio_Plugin)
+            plugin.clap_host = host
+            plugin.clap_plugin = {
                 desc = &clap_plugin_descriptor,
-                plugin_data = instance,
+                plugin_data = plugin,
                 init = clap_plugin_init,
                 destroy = clap_plugin_destroy,
                 activate = clap_plugin_activate,
@@ -35,7 +35,7 @@ clap_plugin_factory := Clap_Plugin_Factory{
                 get_extension = clap_plugin_get_extension,
                 on_main_thread = clap_plugin_on_main_thread,
             }
-            return &instance.clap_plugin
+            return &plugin.clap_plugin
         }
         return nil
     },

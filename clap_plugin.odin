@@ -21,34 +21,34 @@ get_instance :: proc "c" (plugin: ^Clap_Plugin) -> ^Audio_Plugin {
 
 clap_plugin_init :: proc "c" (plugin: ^Clap_Plugin) -> bool {
     context = runtime.default_context()
-    instance := get_instance(plugin)
-    audio_plugin_base_init(instance)
-    // instance.clap_host_log = cast(^Clap_Host_Log)(instance.clap_host->get_extension(CLAP_EXT_LOG))
-    instance.clap_host_timer_support = cast(^Clap_Host_Timer_Support)instance.clap_host->get_extension(CLAP_EXT_TIMER_SUPPORT)
-    instance.clap_host_latency = cast(^Clap_Host_Latency)(instance.clap_host->get_extension(CLAP_EXT_LATENCY))
-    on_create(instance)
+    plugin := get_instance(plugin)
+    audio_plugin_base_init(plugin)
+    // plugin.clap_host_log = cast(^Clap_Host_Log)(plugin.clap_host->get_extension(CLAP_EXT_LOG))
+    plugin.clap_host_timer_support = cast(^Clap_Host_Timer_Support)plugin.clap_host->get_extension(CLAP_EXT_TIMER_SUPPORT)
+    plugin.clap_host_latency = cast(^Clap_Host_Latency)(plugin.clap_host->get_extension(CLAP_EXT_LATENCY))
+    on_create(plugin)
     return true
 }
 
 clap_plugin_destroy :: proc "c" (plugin: ^Clap_Plugin) {
     context = runtime.default_context()
-    instance := get_instance(plugin)
-    on_destroy(instance)
-    audio_plugin_base_destroy(instance)
+    plugin := get_instance(plugin)
+    on_destroy(plugin)
+    audio_plugin_base_destroy(plugin)
 }
 
 clap_plugin_activate :: proc "c" (plugin: ^Clap_Plugin, sample_rate: f64, min_frames_count, max_frames_count: u32) -> bool {
     context = runtime.default_context()
-    instance := get_instance(plugin)
-    instance.sample_rate = sample_rate
-    instance.is_active = true
+    plugin := get_instance(plugin)
+    plugin.sample_rate = sample_rate
+    plugin.is_active = true
     return true
 }
 
 clap_plugin_deactivate :: proc "c" (plugin: ^Clap_Plugin) {
     context = runtime.default_context()
-    instance := get_instance(plugin)
-    instance.is_active = false
+    plugin := get_instance(plugin)
+    plugin.is_active = false
 }
 
 clap_plugin_start_processing :: proc "c" (plugin: ^Clap_Plugin) -> bool {
@@ -60,12 +60,13 @@ clap_plugin_stop_processing :: proc "c" (plugin: ^Clap_Plugin) {
 
 clap_plugin_reset :: proc "c" (plugin: ^Clap_Plugin) {
     context = runtime.default_context()
-    instance := get_instance(plugin)
+    plugin := get_instance(plugin)
+    on_reset(plugin)
 }
 
 clap_plugin_process :: proc "c" (plugin: ^Clap_Plugin, process: ^Clap_Process) -> Clap_Process_Status {
     context = runtime.default_context()
-    instance := get_instance(plugin)
+    plugin := get_instance(plugin)
 
     frame_count := process.frames_count
     event_count := process.in_events->size()
@@ -76,9 +77,8 @@ clap_plugin_process :: proc "c" (plugin: ^Clap_Plugin, process: ^Clap_Process) -
     }
     frame: u32 = 0
 
-    parameters_sync_main_to_audio(instance, process.out_events)
-
-    dispatch_transport_event(instance, process.transport)
+    parameters_sync_main_to_audio(plugin, process.out_events)
+    dispatch_transport_event(plugin, process.transport)
 
     for frame < frame_count {
         for event_index < event_count && next_event_index == frame {
@@ -89,8 +89,8 @@ clap_plugin_process :: proc "c" (plugin: ^Clap_Plugin, process: ^Clap_Process) -
             }
 
             if event_header.space_id == CLAP_CORE_EVENT_SPACE_ID {
-                dispatch_parameter_event(instance, event_header)
-                dispatch_midi_event(instance, event_header)
+                dispatch_parameter_event(plugin, event_header)
+                dispatch_midi_event(plugin, event_header)
             }
 
             event_index += 1
@@ -101,10 +101,13 @@ clap_plugin_process :: proc "c" (plugin: ^Clap_Plugin, process: ^Clap_Process) -
             }
         }
 
+        // Audio processing will happen here eventually
+
         frame = next_event_index
     }
 
-    on_process(instance, int(frame_count))
+    on_process(plugin, int(frame_count))
+    send_output_midi_events_to_host(plugin, process.out_events)
 
     return .Continue
 }
@@ -124,7 +127,14 @@ clap_plugin_get_extension :: proc "c" (plugin: ^Clap_Plugin, id: cstring) -> raw
 clap_plugin_on_main_thread :: proc "c" (plugin: ^Clap_Plugin) {
 }
 
-dispatch_transport_event :: proc(instance: ^Audio_Plugin, clap_event: ^Clap_Event_Transport) {
+send_output_midi_events_to_host :: proc(plugin: ^Audio_Plugin, out_events: ^Clap_Output_Events) {
+    for event in &plugin.output_midi_events {
+        out_events->try_push(&event.header)
+    }
+    resize(&plugin.output_midi_events, 0)
+}
+
+dispatch_transport_event :: proc(plugin: ^Audio_Plugin, clap_event: ^Clap_Event_Transport) {
     if clap_event != nil {
         event: Transport_Event
         if .Is_Playing in clap_event.flags {
@@ -161,7 +171,7 @@ dispatch_transport_event :: proc(instance: ^Audio_Plugin, clap_event: ^Clap_Even
             event.loop_start_seconds = _from_sec_time(clap_event.loop_start_seconds)
             event.loop_end_seconds = _from_sec_time(clap_event.loop_end_seconds)
         }
-        on_transport_event(instance, event)
+        on_transport_event(plugin, event)
     }
 }
 

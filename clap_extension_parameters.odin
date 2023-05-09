@@ -5,30 +5,30 @@ import "core:strconv"
 import "core:sync"
 import "core:runtime"
 
-main_thread_parameter :: proc "c" (instance: ^Audio_Plugin, id: Parameter) -> f64 {
-    return instance.main_thread_parameter_value[id]
+main_thread_parameter :: proc "c" (plugin: ^Audio_Plugin, id: Parameter) -> f64 {
+    return plugin.main_thread_parameter_value[id]
 }
 
-set_main_thread_parameter :: proc "c" (instance: ^Audio_Plugin, id: Parameter, value: f64) {
-    instance.main_thread_parameter_value[id] = value
-    instance.main_thread_parameter_changed[id] = true
+set_main_thread_parameter :: proc "c" (plugin: ^Audio_Plugin, id: Parameter, value: f64) {
+    plugin.main_thread_parameter_value[id] = value
+    plugin.main_thread_parameter_changed[id] = true
 }
 
-audio_thread_parameter :: proc "c" (instance: ^Audio_Plugin, id: Parameter) -> f64 {
-    return instance.audio_thread_parameter_value[id]
+audio_thread_parameter :: proc "c" (plugin: ^Audio_Plugin, id: Parameter) -> f64 {
+    return plugin.audio_thread_parameter_value[id]
 }
 
-set_audio_thread_parameter :: proc "c" (instance: ^Audio_Plugin, id: Parameter, value: f64) {
-    instance.audio_thread_parameter_value[id] = value
-    instance.audio_thread_parameter_changed[id] = true
+set_audio_thread_parameter :: proc "c" (plugin: ^Audio_Plugin, id: Parameter, value: f64) {
+    plugin.audio_thread_parameter_value[id] = value
+    plugin.audio_thread_parameter_changed[id] = true
 }
 
-parameters_sync_main_to_audio :: proc "c" (instance: ^Audio_Plugin, out_events: ^Clap_Output_Events) {
-    sync.lock(&instance.parameter_mutex)
+parameters_sync_main_to_audio :: proc "c" (plugin: ^Audio_Plugin, out_events: ^Clap_Output_Events) {
+    sync.lock(&plugin.parameter_mutex)
     for id in Parameter {
-        if instance.main_thread_parameter_changed[id] {
-            instance.audio_thread_parameter_value[id] = instance.main_thread_parameter_value[id]
-            instance.main_thread_parameter_changed[id] = false
+        if plugin.main_thread_parameter_changed[id] {
+            plugin.audio_thread_parameter_value[id] = plugin.main_thread_parameter_value[id]
+            plugin.main_thread_parameter_changed[id] = false
 
             event := Clap_Event_Param_Value{
                 header = {
@@ -44,23 +44,23 @@ parameters_sync_main_to_audio :: proc "c" (instance: ^Audio_Plugin, out_events: 
                 port_index = -1,
                 channel = -1,
                 key = -1,
-                value = instance.audio_thread_parameter_value[id],
+                value = plugin.audio_thread_parameter_value[id],
             }
             out_events->try_push(&event.header)
         }
     }
-    sync.unlock(&instance.parameter_mutex)
+    sync.unlock(&plugin.parameter_mutex)
 }
 
-parameters_sync_audio_to_main :: proc "c" (instance: ^Audio_Plugin) {
-    sync.lock(&instance.parameter_mutex)
+parameters_sync_audio_to_main :: proc "c" (plugin: ^Audio_Plugin) {
+    sync.lock(&plugin.parameter_mutex)
     for id in Parameter {
-        if instance.audio_thread_parameter_changed[id] {
-            instance.main_thread_parameter_value[id] = instance.audio_thread_parameter_value[id]
-            instance.audio_thread_parameter_changed[id] = false
+        if plugin.audio_thread_parameter_changed[id] {
+            plugin.main_thread_parameter_value[id] = plugin.audio_thread_parameter_value[id]
+            plugin.audio_thread_parameter_changed[id] = false
         }
     }
-    sync.unlock(&instance.parameter_mutex)
+    sync.unlock(&plugin.parameter_mutex)
 }
 
 parameter_flags_to_clap_flags :: proc "c" (flags: bit_set[Parameter_Flag]) -> bit_set[Clap_Param_Info_Flag; u32] {
@@ -84,16 +84,16 @@ parameter_flags_to_clap_flags :: proc "c" (flags: bit_set[Parameter_Flag]) -> bi
     return result
 }
 
-dispatch_parameter_event :: proc(instance: ^Audio_Plugin, event_header: ^Clap_Event_Header) {
+dispatch_parameter_event :: proc(plugin: ^Audio_Plugin, event_header: ^Clap_Event_Header) {
     #partial switch event_header.type {
     case .Param_Value:
         clap_event := cast(^Clap_Event_Param_Value)event_header
-        sync.lock(&instance.parameter_mutex)
+        sync.lock(&plugin.parameter_mutex)
         id := Parameter(clap_event.param_id)
-        instance.audio_thread_parameter_value[id] = clap_event.value
-        instance.audio_thread_parameter_changed[id] = true
-        sync.unlock(&instance.parameter_mutex)
-        on_parameter_event(instance, Parameter_Event{
+        plugin.audio_thread_parameter_value[id] = clap_event.value
+        plugin.audio_thread_parameter_changed[id] = true
+        sync.unlock(&plugin.parameter_mutex)
+        on_parameter_event(plugin, Parameter_Event{
             id = Parameter(clap_event.param_id),
             kind = .Value,
             note_id = int(clap_event.note_id),
@@ -121,15 +121,15 @@ clap_extension_parameters := Clap_Plugin_Params{
         return true
     },
     get_value = proc "c" (plugin: ^Clap_Plugin, param_id: Clap_Id, out_value: ^f64) -> bool {
-        instance := get_instance(plugin)
-        sync.lock(&instance.parameter_mutex)
+        plugin := get_instance(plugin)
+        sync.lock(&plugin.parameter_mutex)
         id := Parameter(param_id)
-        if instance.main_thread_parameter_changed[id] {
-            out_value^ = instance.main_thread_parameter_value[id]
+        if plugin.main_thread_parameter_changed[id] {
+            out_value^ = plugin.main_thread_parameter_value[id]
         } else {
-            out_value^ = instance.audio_thread_parameter_value[id]
+            out_value^ = plugin.audio_thread_parameter_value[id]
         }
-        sync.unlock(&instance.parameter_mutex)
+        sync.unlock(&plugin.parameter_mutex)
         return true
     },
     value_to_text = proc "c" (plugin: ^Clap_Plugin, param_id: Clap_Id, value: f64, out_buffer: [^]byte, out_buffer_capacity: u32) -> bool {
@@ -156,12 +156,12 @@ clap_extension_parameters := Clap_Plugin_Params{
     },
     flush = proc "c" (plugin: ^Clap_Plugin, input: ^Clap_Input_Events, output: ^Clap_Output_Events) {
         context = runtime.default_context()
-        instance := get_instance(plugin)
+        plugin := get_instance(plugin)
         event_count := input->size()
-        parameters_sync_main_to_audio(instance, output)
+        parameters_sync_main_to_audio(plugin, output)
         for i in 0 ..< event_count {
             event_header := input->get(i)
-            dispatch_parameter_event(instance, event_header)
+            dispatch_parameter_event(plugin, event_header)
         }
     },
 }

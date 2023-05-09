@@ -131,7 +131,11 @@ Audio_Plugin_Base :: struct {
     main_thread_parameter_changed: [Parameter]bool,
     audio_thread_parameter_value: [Parameter]f64,
     audio_thread_parameter_changed: [Parameter]bool,
-    output_midi_events: [dynamic]Midi_Event,
+    output_midi_events: [dynamic]Clap_Event_Midi,
+}
+
+milliseconds_to_samples :: proc(plugin: ^Audio_Plugin, milliseconds: f64) -> int {
+    return int(plugin.sample_rate * milliseconds * 0.001)
 }
 
 write_string :: proc "c" (buffer: []byte, value: string) {
@@ -140,15 +144,15 @@ write_string :: proc "c" (buffer: []byte, value: string) {
     buffer[min(n, len(buffer) - 1)] = 0
 }
 
-audio_plugin_base_init :: proc(instance: ^Audio_Plugin_Base) {
+audio_plugin_base_init :: proc(plugin: ^Audio_Plugin_Base) {
     for parameter in Parameter {
-        instance.audio_thread_parameter_value[parameter] = parameter_info[parameter].default_value
-        instance.main_thread_parameter_value[parameter] = parameter_info[parameter].default_value
+        plugin.audio_thread_parameter_value[parameter] = parameter_info[parameter].default_value
+        plugin.main_thread_parameter_value[parameter] = parameter_info[parameter].default_value
     }
 }
 
-audio_plugin_base_destroy :: proc(instance: ^Audio_Plugin_Base) {
-    delete(instance.timer_name_to_id)
-    delete(instance.timer_id_to_proc)
-    free(instance)
+audio_plugin_base_destroy :: proc(plugin: ^Audio_Plugin_Base) {
+    delete(plugin.timer_name_to_id)
+    delete(plugin.timer_id_to_proc)
+    free(plugin)
 }
