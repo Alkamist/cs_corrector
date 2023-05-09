@@ -1,8 +1,6 @@
 package main
 
-import "clap"
-
-set_latency :: proc(instance: ^Plugin_Instance, value: int) {
+set_latency :: proc(instance: ^Audio_Plugin, value: int) {
     instance.latency = value
     if instance.clap_host_latency == nil ||
        instance.clap_host_latency.changed == nil ||
@@ -17,8 +15,8 @@ set_latency :: proc(instance: ^Plugin_Instance, value: int) {
     }
 }
 
-latency_extension := clap.Plugin_Latency{
-    get = proc "c" (plugin: ^clap.Plugin) -> u32 {
+clap_extension_latency := Clap_Plugin_Latency{
+    get = proc "c" (plugin: ^Clap_Plugin) -> u32 {
         instance := get_instance(plugin)
         return u32(max(0, instance.latency))
     },
