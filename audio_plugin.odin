@@ -29,10 +29,13 @@
 // Implement these:
 //     on_create :: proc(plugin: ^Audio_Plugin) {}
 //     on_destroy :: proc(plugin: ^Audio_Plugin) {}
+//     on_reset :: proc(plugin: ^Audio_Plugin) {}
 //     on_parameter_event :: proc(plugin: ^Audio_Plugin, event: Parameter_Event) {}
 //     on_transport_event :: proc(plugin: ^Audio_Plugin, event: Transport_Event) {}
 //     on_midi_event :: proc(plugin: ^Audio_Plugin, event: Midi_Event) {}
 //     on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {}
+//     save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) {}
+//     load_preset :: proc(plugin: ^Audio_Plugin, data: string) {}
 
 package main
 

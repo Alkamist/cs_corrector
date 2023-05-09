@@ -8,11 +8,9 @@ clap_plugin_factory := Clap_Plugin_Factory{
     get_plugin_count = proc "c" (factory: ^Clap_Plugin_Factory) -> u32 {
         return 1
     },
-
     get_plugin_descriptor = proc "c" (factory: ^Clap_Plugin_Factory, index: u32) -> ^Clap_Plugin_Descriptor {
         return &clap_plugin_descriptor
     },
-
     create_plugin = proc "c" (factory: ^Clap_Plugin_Factory, host: ^Clap_Host, plugin_id: cstring) -> ^Clap_Plugin {
         context = runtime.default_context()
         if !clap_version_is_compatible(host.clap_version) {
@@ -44,14 +42,11 @@ clap_plugin_factory := Clap_Plugin_Factory{
 @export
 clap_entry := Clap_Plugin_Entry{
 	clap_version = CLAP_VERSION,
-
 	init = proc "c" (plugin_path: cstring) -> bool {
         return true
     },
-
 	deinit = proc "c" () {
     },
-
 	get_factory = proc "c" (factory_id: cstring) -> rawptr {
         if factory_id == CLAP_PLUGIN_FACTORY_ID {
             return &clap_plugin_factory

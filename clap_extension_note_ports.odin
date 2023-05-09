@@ -28,7 +28,6 @@ clap_extension_note_ports := Clap_Plugin_Note_Ports{
     count = proc "c" (plugin: ^Clap_Plugin, is_input: bool) -> u32 {
         return 1
     },
-
     get = proc "c" (plugin: ^Clap_Plugin, index: u32, is_input: bool, info: ^Clap_Note_Port_Info) -> bool {
         info.id = 0
         info.supported_dialects = {.Midi}

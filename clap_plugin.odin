@@ -118,7 +118,7 @@ clap_plugin_get_extension :: proc "c" (plugin: ^Clap_Plugin, id: cstring) -> raw
     case CLAP_EXT_LATENCY: return &clap_extension_latency
     case CLAP_EXT_PARAMS: return &clap_extension_parameters
     case CLAP_EXT_TIMER_SUPPORT: return &clap_extension_timer
-    // case CLAP_EXT_STATE: return &clap_extension_state
+    case CLAP_EXT_STATE: return &clap_extension_state
     // case CLAP_EXT_GUI: return &clap_extension_gui
     case: return nil
     }

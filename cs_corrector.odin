@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:sync"
 import "core:strings"
+import "core:encoding/json"
 
 // =====================================================================
 ID :: "com.alkamist.CsCorrector"
@@ -93,6 +94,40 @@ on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
     // }
 }
 
+save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
+    preset := Cs_Corrector_Preset_V1{
+        preset_version = 1,
+        legato_first_note_delay = main_thread_parameter(plugin, .Legato_First_Note_Delay),
+        legato_portamento_delay = main_thread_parameter(plugin, .Legato_Portamento_Delay),
+        legato_slow_delay = main_thread_parameter(plugin, .Legato_Slow_Delay),
+        legato_medium_delay = main_thread_parameter(plugin, .Legato_Medium_Delay),
+        legato_fast_delay = main_thread_parameter(plugin, .Legato_Fast_Delay),
+    }
+    preset_as_json, err := json.marshal(preset)
+    strings.write_bytes(builder, preset_as_json)
+    if err != nil {
+        return false
+    }
+    return true
+}
+
+load_preset :: proc(plugin: ^Audio_Plugin, data: []byte) {
+    data_json, err := json.parse(data)
+    if err != nil {
+        return
+    }
+    preset, is_object := data_json.(json.Object)
+    if !is_object {
+        return
+    }
+    _load_parameter(plugin, preset, .Legato_First_Note_Delay, "legato_first_note_delay")
+    _load_parameter(plugin, preset, .Legato_Portamento_Delay, "legato_portamento_delay")
+    _load_parameter(plugin, preset, .Legato_Slow_Delay, "legato_slow_delay")
+    _load_parameter(plugin, preset, .Legato_Medium_Delay, "legato_medium_delay")
+    _load_parameter(plugin, preset, .Legato_Fast_Delay, "legato_fast_delay")
+    // debug(plugin, fmt.aprint(data_json))
+}
+
 debug :: proc(plugin: ^Audio_Plugin, msg: string) {
     msg_with_newline := strings.concatenate({msg, "\n"})
     defer delete(msg_with_newline)
@@ -100,4 +135,16 @@ debug :: proc(plugin: ^Audio_Plugin, msg: string) {
     strings.write_string(&plugin.debug_string_builder, msg_with_newline)
     plugin.debug_string_changed = true
     sync.unlock(&plugin.debug_string_mutex)
+}
+
+_load_parameter :: proc(plugin: ^Audio_Plugin, preset: json.Object, id: Parameter, key: string) {
+    value_json, value_exists := preset[key]
+    if !value_exists {
+        set_main_thread_parameter(plugin, id, parameter_info[id].default_value)
+    }
+    value, is_float := value_json.(f64)
+    if !is_float {
+        set_main_thread_parameter(plugin, id, parameter_info[id].default_value)
+    }
+    set_main_thread_parameter(plugin, id, value)
 }
