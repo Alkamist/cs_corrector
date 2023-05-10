@@ -1,9 +1,8 @@
 package main
 
-import "core:fmt"
+// import "core:fmt"
 import "core:sync"
 import "core:strings"
-import "core:encoding/json"
 
 // =====================================================================
 ID :: "com.alkamist.CsCorrector"
@@ -85,47 +84,30 @@ on_midi_event :: proc(plugin: ^Audio_Plugin, event: Midi_Event) {
 
 on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
     send_note_events(plugin, frame_count)
-    // for key in 0 ..< KEY_COUNT {
-    //     if len(plugin.notes[key]) > 0 {
-    //         msg := fmt.aprint(plugin.notes[key])
-    //         defer delete(msg)
-    //         debug(plugin, msg)
-    //     }
-    // }
 }
 
 save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
     preset := Cs_Corrector_Preset_V1{
         preset_version = 1,
-        legato_first_note_delay = main_thread_parameter(plugin, .Legato_First_Note_Delay),
-        legato_portamento_delay = main_thread_parameter(plugin, .Legato_Portamento_Delay),
-        legato_slow_delay = main_thread_parameter(plugin, .Legato_Slow_Delay),
-        legato_medium_delay = main_thread_parameter(plugin, .Legato_Medium_Delay),
-        legato_fast_delay = main_thread_parameter(plugin, .Legato_Fast_Delay),
+        legato_first_note_delay = f64le(main_thread_parameter(plugin, .Legato_First_Note_Delay)),
+        legato_portamento_delay = f64le(main_thread_parameter(plugin, .Legato_Portamento_Delay)),
+        legato_slow_delay = f64le(main_thread_parameter(plugin, .Legato_Slow_Delay)),
+        legato_medium_delay = f64le(main_thread_parameter(plugin, .Legato_Medium_Delay)),
+        legato_fast_delay = f64le(main_thread_parameter(plugin, .Legato_Fast_Delay)),
     }
-    preset_as_json, err := json.marshal(preset)
-    strings.write_bytes(builder, preset_as_json)
-    if err != nil {
-        return false
-    }
+    preset_data := transmute([size_of(preset)]byte)preset
+    strings.write_bytes(builder, preset_data[:])
     return true
 }
 
 load_preset :: proc(plugin: ^Audio_Plugin, data: []byte) {
-    data_json, err := json.parse(data)
-    if err != nil {
-        return
-    }
-    preset, is_object := data_json.(json.Object)
-    if !is_object {
-        return
-    }
-    _load_parameter(plugin, preset, .Legato_First_Note_Delay, "legato_first_note_delay")
-    _load_parameter(plugin, preset, .Legato_Portamento_Delay, "legato_portamento_delay")
-    _load_parameter(plugin, preset, .Legato_Slow_Delay, "legato_slow_delay")
-    _load_parameter(plugin, preset, .Legato_Medium_Delay, "legato_medium_delay")
-    _load_parameter(plugin, preset, .Legato_Fast_Delay, "legato_fast_delay")
-    // debug(plugin, fmt.aprint(data_json))
+    preset := (cast(^Cs_Corrector_Preset_V1)&data[0])^
+    set_main_thread_parameter(plugin, .Legato_First_Note_Delay, f64(preset.legato_first_note_delay))
+    set_main_thread_parameter(plugin, .Legato_Portamento_Delay, f64(preset.legato_portamento_delay))
+    set_main_thread_parameter(plugin, .Legato_Slow_Delay, f64(preset.legato_slow_delay))
+    set_main_thread_parameter(plugin, .Legato_Medium_Delay, f64(preset.legato_medium_delay))
+    set_main_thread_parameter(plugin, .Legato_Fast_Delay, f64(preset.legato_fast_delay))
+    set_latency(plugin, required_latency(plugin))
 }
 
 debug :: proc(plugin: ^Audio_Plugin, msg: string) {
@@ -135,16 +117,4 @@ debug :: proc(plugin: ^Audio_Plugin, msg: string) {
     strings.write_string(&plugin.debug_string_builder, msg_with_newline)
     plugin.debug_string_changed = true
     sync.unlock(&plugin.debug_string_mutex)
-}
-
-_load_parameter :: proc(plugin: ^Audio_Plugin, preset: json.Object, id: Parameter, key: string) {
-    value_json, value_exists := preset[key]
-    if !value_exists {
-        set_main_thread_parameter(plugin, id, parameter_info[id].default_value)
-    }
-    value, is_float := value_json.(f64)
-    if !is_float {
-        set_main_thread_parameter(plugin, id, parameter_info[id].default_value)
-    }
-    set_main_thread_parameter(plugin, id, value)
 }
