@@ -8,46 +8,14 @@ Parameter :: enum {
     Legato_Fast_Delay,
 }
 
+make_param :: proc(id: Parameter, name: string, default_value: f64) -> Parameter_Info {
+    return {id, name, -500.0, 500.0, default_value, {.Is_Automatable}, ""}
+}
+
 parameter_info := [len(Parameter)]Parameter_Info{
-    {
-        id = .Legato_First_Note_Delay,
-        flags = {.Is_Automatable},
-        name = "Legato First Note Delay",
-        module = "",
-        min_value = -500.0,
-        max_value = 500.0,
-        default_value = -60.0,
-    }, {
-        id = .Legato_Portamento_Delay,
-        flags = {.Is_Automatable},
-        name = "Legato Portamento Delay",
-        module = "",
-        min_value = -500.0,
-        max_value = 500.0,
-        default_value = -300.0,
-    }, {
-        id = .Legato_Slow_Delay,
-        flags = {.Is_Automatable},
-        name = "Legato Slow Delay",
-        module = "",
-        min_value = -500.0,
-        max_value = 500.0,
-        default_value = -300.0,
-    }, {
-        id = .Legato_Medium_Delay,
-        flags = {.Is_Automatable},
-        name = "Legato Medium Delay",
-        module = "",
-        min_value = -500.0,
-        max_value = 500.0,
-        default_value = -300.0,
-    }, {
-        id = .Legato_Fast_Delay,
-        flags = {.Is_Automatable},
-        name = "Legato Fast Delay",
-        module = "",
-        min_value = -500.0,
-        max_value = 500.0,
-        default_value = -150.0,
-    },
+    make_param(.Legato_First_Note_Delay, "Legato First Note Delay", -60.0),
+    make_param(.Legato_Portamento_Delay, "Legato Portamento Delay", -300.0),
+    make_param(.Legato_Slow_Delay, "Legato Slow Delay", -300.0),
+    make_param(.Legato_Medium_Delay, "Legato Medium Delay", -300.0),
+    make_param(.Legato_Fast_Delay, "Legato Fast Delay", -150.0),
 }

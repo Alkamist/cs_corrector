@@ -88,12 +88,13 @@ on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
 
 save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
     preset := Cs_Corrector_Preset_V1{
+        size = size_of(Cs_Corrector_Preset_V1),
         preset_version = 1,
-        legato_first_note_delay = f64le(main_thread_parameter(plugin, .Legato_First_Note_Delay)),
-        legato_portamento_delay = f64le(main_thread_parameter(plugin, .Legato_Portamento_Delay)),
-        legato_slow_delay = f64le(main_thread_parameter(plugin, .Legato_Slow_Delay)),
-        legato_medium_delay = f64le(main_thread_parameter(plugin, .Legato_Medium_Delay)),
-        legato_fast_delay = f64le(main_thread_parameter(plugin, .Legato_Fast_Delay)),
+        parameter_offset = i64le(offset_of(Cs_Corrector_Preset_V1, parameters)),
+        parameter_count = len(Parameter),
+    }
+    for id in Parameter {
+        preset.parameters[id] = f64le(main_thread_parameter(plugin, id))
     }
     preset_data := transmute([size_of(preset)]byte)preset
     strings.write_bytes(builder, preset_data[:])
@@ -102,11 +103,9 @@ save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
 
 load_preset :: proc(plugin: ^Audio_Plugin, data: []byte) {
     preset := (cast(^Cs_Corrector_Preset_V1)&data[0])^
-    set_main_thread_parameter(plugin, .Legato_First_Note_Delay, f64(preset.legato_first_note_delay))
-    set_main_thread_parameter(plugin, .Legato_Portamento_Delay, f64(preset.legato_portamento_delay))
-    set_main_thread_parameter(plugin, .Legato_Slow_Delay, f64(preset.legato_slow_delay))
-    set_main_thread_parameter(plugin, .Legato_Medium_Delay, f64(preset.legato_medium_delay))
-    set_main_thread_parameter(plugin, .Legato_Fast_Delay, f64(preset.legato_fast_delay))
+    for id in Parameter {
+        set_main_thread_parameter(plugin, id, f64(preset.parameters[id]))
+    }
     set_latency(plugin, required_latency(plugin))
 }
 
