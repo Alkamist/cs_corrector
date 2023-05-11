@@ -1,8 +1,9 @@
 package main
 
-// import "core:fmt"
+import "core:fmt"
 import "core:sync"
 import "core:strings"
+import lta "legato_time_adjuster"
 
 // =====================================================================
 ID :: "com.alkamist.CsCorrector"
@@ -19,10 +20,8 @@ Audio_Plugin :: struct {
     using base: Audio_Plugin_Base,
     is_playing: bool,
     was_playing: bool,
-    notes: [KEY_COUNT][dynamic]Note,
-    held_key: Maybe(int),
-    hold_pedal_is_physically_held: bool,
-    hold_pedal_is_virtually_held: bool,
+    note_index: [lta.KEY_COUNT]int,
+    lta: lta.Legato_Time_Adjuster,
     debug_string_mutex: sync.Mutex,
     debug_string_builder: strings.Builder,
     debug_string_changed: bool,
@@ -45,22 +44,28 @@ on_create :: proc(plugin: ^Audio_Plugin) {
             sync.unlock(&plugin.debug_string_mutex)
         }
     })
+
+    plugin.lta.legato_velocities[0] = 20
+    plugin.lta.legato_velocities[1] = 64
+    plugin.lta.legato_velocities[2] = 100
+    plugin.lta.legato_velocities[3] = 128
 }
 
 on_destroy :: proc(plugin: ^Audio_Plugin) {
     unregister_timer(plugin, "Debug_Timer")
     strings.builder_destroy(&plugin.debug_string_builder)
-    free_notes(plugin)
+    lta.destroy(&plugin.lta)
 }
 
 on_reset :: proc(plugin: ^Audio_Plugin) {
-    reset_notes(plugin)
+    lta.reset(&plugin.lta)
+    for i in 0 ..< lta.KEY_COUNT do plugin.note_index[i] = 0
 }
 
 on_parameter_event :: proc(plugin: ^Audio_Plugin, event: Parameter_Event) {
     switch event.id {
     case .Legato_First_Note_Delay ..= .Legato_Fast_Delay:
-        set_latency(plugin, required_latency(plugin))
+        _update_legato_time_adjuster(plugin)
     }
 }
 
@@ -73,17 +78,64 @@ on_transport_event :: proc(plugin: ^Audio_Plugin, event: Transport_Event) {
         plugin.is_playing = false
         // Reset the CsCorrector notes on playback stop
         if plugin.was_playing && !plugin.is_playing {
-            reset_notes(plugin)
+            lta.reset(&plugin.lta)
+            for i in 0 ..< lta.KEY_COUNT do plugin.note_index[i] = 0
         }
     }
 }
 
 on_midi_event :: proc(plugin: ^Audio_Plugin, event: Midi_Event) {
-    process_midi_event(plugin, event)
+    // Don't process when project is not playing back so there isn't
+    // an annoying delay when drawing notes on the piano roll
+    if !plugin.is_playing {
+        send_midi_event(plugin, event)
+        return
+    }
+
+    msg := event.data
+    status_code := msg[0] & 0xF0
+
+    is_note_off := status_code == 0x80
+    if is_note_off {
+        // channel := int(msg[0] & 0x0F)
+        key := int(msg[1])
+        velocity := f64(msg[2])
+        lta.process_note_off(&plugin.lta, plugin.note_index[key], event.time, key, velocity)
+        plugin.note_index[key] += 1
+        return
+    }
+
+    is_note_on := status_code == 0x90
+    if is_note_on {
+        // channel := int(msg[0] & 0x0F)
+        key := int(msg[1])
+        velocity := f64(msg[2])
+        lta.process_note_on(&plugin.lta, plugin.note_index[key], event.time, key, velocity)
+        return
+    }
+
+    is_cc := status_code == 0xB0
+    is_hold_pedal := is_cc && msg[1] == 64
+    if is_hold_pedal {
+        is_held := msg[2] > 63
+        lta.process_hold_pedal(&plugin.lta, is_held)
+        // Don't return because we need to send the hold pedal information
+    }
+
+    // Pass any events that aren't note on or off straight to the host
+    event := event
+    event.time += plugin.latency
+    send_midi_event(plugin, event)
 }
 
 on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
-    send_note_events(plugin, frame_count)
+    context.user_ptr = plugin
+    lta.send_note_events(&plugin.lta, frame_count, _send_note_event_proc)
+    // for key in 0 ..< lta.KEY_COUNT {
+    //     if len(plugin.lta.notes[key]) > 0 {
+    //         debug(plugin, fmt.tprint(plugin.lta.notes[key]))
+    //     }
+    // }
 }
 
 save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
@@ -106,7 +158,7 @@ load_preset :: proc(plugin: ^Audio_Plugin, data: []byte) {
     for id in Parameter {
         set_main_thread_parameter(plugin, id, f64(preset.parameters[id]))
     }
-    set_latency(plugin, required_latency(plugin))
+    _update_legato_time_adjuster(plugin)
 }
 
 debug :: proc(plugin: ^Audio_Plugin, msg: string) {
@@ -116,4 +168,28 @@ debug :: proc(plugin: ^Audio_Plugin, msg: string) {
     strings.write_string(&plugin.debug_string_builder, msg_with_newline)
     plugin.debug_string_changed = true
     sync.unlock(&plugin.debug_string_mutex)
+}
+
+_send_note_event_proc :: proc(kind: lta.Note_Event_Kind, index, offset, key: int, velocity: f64) {
+    plugin := cast(^Audio_Plugin)context.user_ptr
+    channel := 0
+    status := channel
+    switch kind {
+    case .Off: status += 0x80
+    case .On: status += 0x90
+    }
+    send_midi_event(plugin, Midi_Event{
+        time = offset,
+        port = 0,
+        data = {u8(status), u8(key), u8(min(127, velocity))},
+    })
+}
+
+_update_legato_time_adjuster :: proc(plugin: ^Audio_Plugin) {
+    plugin.lta.first_note_delay = milliseconds_to_samples(plugin, audio_thread_parameter(plugin, .Legato_First_Note_Delay))
+    plugin.lta.legato_delays[0] = milliseconds_to_samples(plugin, audio_thread_parameter(plugin, .Legato_Portamento_Delay))
+    plugin.lta.legato_delays[1] = milliseconds_to_samples(plugin, audio_thread_parameter(plugin, .Legato_Slow_Delay))
+    plugin.lta.legato_delays[2] = milliseconds_to_samples(plugin, audio_thread_parameter(plugin, .Legato_Medium_Delay))
+    plugin.lta.legato_delays[3] = milliseconds_to_samples(plugin, audio_thread_parameter(plugin, .Legato_Fast_Delay))
+    set_latency(plugin, lta.required_latency(&plugin.lta))
 }
