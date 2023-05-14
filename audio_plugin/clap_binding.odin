@@ -1,4 +1,4 @@
-package main
+package audio_plugin
 
 import "core:c"
 
