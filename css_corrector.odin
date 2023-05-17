@@ -1,21 +1,22 @@
 package main
 
-import ap "audio_plugin"
+import "core:fmt"
+import "core:sync"
+import "core:strings"
+import "reaper"
 
-CSS_ID :: "com.alkamist.CssCorrector"
-CSS_NAME :: "Css Corrector"
-CSS_VENDOR :: "Alkamist Audio"
-CSS_URL :: ""
-CSS_MANUAL_URL :: ""
-CSS_SUPPORT_URL :: ""
-CSS_VERSION :: "0.1.0"
-CSS_DESCRIPTION :: "A MIDI timing corrector for Cinematic Studio Strings."
+// =====================================================================
+ID :: "com.alkamist.CssCorrector"
+NAME :: "Css Corrector"
+VENDOR :: "Alkamist Audio"
+URL :: ""
+MANUAL_URL :: ""
+SUPPORT_URL :: ""
+VERSION :: "0.1.0"
+DESCRIPTION :: "A MIDI timing corrector for Cinematic Studio Strings."
+// =====================================================================
 
-Css_Corrector :: struct {
-    using audio_plugin: ap.Audio_Plugin,
-}
-
-Css_Parameter :: enum {
+Parameter :: enum {
     Legato_First_Note_Delay,
     Legato_Portamento_Delay,
     Legato_Slow_Delay,
@@ -23,29 +24,77 @@ Css_Parameter :: enum {
     Legato_Fast_Delay,
 }
 
-css_on_init :: proc(plugin: ^Css_Corrector) {
+Audio_Plugin :: struct {
+    using base: Audio_Plugin_Base,
+    debug_string_mutex: sync.Mutex,
+    debug_string_builder: strings.Builder,
+    debug_string_changed: bool,
 }
 
-css_on_destroy :: proc(plugin: ^Css_Corrector) {
+on_create :: proc(plugin: ^Audio_Plugin) {
+    reaper_plugin_info := cast(^reaper.Plugin_Info)plugin.clap_host->get_extension("cockos.reaper_extension")
+    reaper.load_functions(reaper_plugin_info)
+
+    plugin.debug_string_builder = strings.builder_make_none()
+
+    register_timer(plugin, "Debug_Timer", 0, proc(plugin: ^Audio_Plugin) {
+        if plugin.debug_string_changed {
+            sync.lock(&plugin.debug_string_mutex)
+            debug_cstring := strings.clone_to_cstring(strings.to_string(plugin.debug_string_builder))
+            defer delete(debug_cstring)
+            reaper.show_console_msg(debug_cstring)
+            strings.builder_reset(&plugin.debug_string_builder)
+            plugin.debug_string_changed = false
+            sync.unlock(&plugin.debug_string_mutex)
+        }
+    })
 }
 
-css_on_activate :: proc(plugin: ^Css_Corrector) {
+on_destroy :: proc(plugin: ^Audio_Plugin) {
+    unregister_timer(plugin, "Debug_Timer")
+    strings.builder_destroy(&plugin.debug_string_builder)
 }
 
-css_on_deactivate :: proc(plugin: ^Css_Corrector) {
+on_activate :: proc(plugin: ^Audio_Plugin) {
+    register_timer(plugin, "Debug_Timer", 0, proc(plugin: ^Audio_Plugin) {
+        if plugin.debug_string_changed {
+            sync.lock(&plugin.debug_string_mutex)
+            debug_cstring := strings.clone_to_cstring(strings.to_string(plugin.debug_string_builder))
+            defer delete(debug_cstring)
+            reaper.show_console_msg(debug_cstring)
+            strings.builder_reset(&plugin.debug_string_builder)
+            plugin.debug_string_changed = false
+            sync.unlock(&plugin.debug_string_mutex)
+        }
+    })
 }
 
-css_on_reset :: proc(plugin: ^Css_Corrector) {
+on_deactivate :: proc(plugin: ^Audio_Plugin) {
 }
 
-css_on_transport_event :: proc(plugin: ^Css_Corrector, event: ap.Transport_Event) {
+on_reset :: proc(plugin: ^Audio_Plugin) {
 }
 
-make_param :: proc(id: Css_Parameter, name: string, default_value: f64) -> ap.Parameter_Info {
-    return {int(id), name, -500.0, 500.0, default_value, {.Is_Automatable}, ""}
+on_parameter_event :: proc(plugin: ^Audio_Plugin, event: Parameter_Event) {
 }
 
-css_parameter_info := [len(Css_Parameter)]ap.Parameter_Info{
+on_transport_event :: proc(plugin: ^Audio_Plugin, event: Transport_Event) {
+    // debug(plugin, fmt.tprint(event))
+    // free_all(context.temp_allocator)
+}
+
+on_midi_event :: proc(plugin: ^Audio_Plugin, event: Midi_Event) {
+    send_midi_event(plugin, event)
+}
+
+save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
+    return false
+}
+
+load_preset :: proc(plugin: ^Audio_Plugin, data: []byte) {
+}
+
+parameter_info := [len(Parameter)]Parameter_Info{
     make_param(.Legato_First_Note_Delay, "Legato First Note Delay", -60.0),
     make_param(.Legato_Portamento_Delay, "Legato Portamento Delay", -300.0),
     make_param(.Legato_Slow_Delay, "Legato Slow Delay", -300.0),
@@ -53,23 +102,15 @@ css_parameter_info := [len(Css_Parameter)]ap.Parameter_Info{
     make_param(.Legato_Fast_Delay, "Legato Fast Delay", -150.0),
 }
 
-css_vtable := ap.Audio_Plugin_VTable{
-    on_init = proc(plugin: ^ap.Audio_Plugin) {
-        css_on_init(cast(^Css_Corrector)plugin)
-    },
-    on_destroy = proc(plugin: ^ap.Audio_Plugin) {
-        css_on_destroy(cast(^Css_Corrector)plugin)
-    },
-    on_activate = proc(plugin: ^ap.Audio_Plugin) {
-        css_on_activate(cast(^Css_Corrector)plugin)
-    },
-    on_deactivate = proc(plugin: ^ap.Audio_Plugin) {
-        css_on_deactivate(cast(^Css_Corrector)plugin)
-    },
-    on_reset = proc(plugin: ^ap.Audio_Plugin) {
-        css_on_reset(cast(^Css_Corrector)plugin)
-    },
-    on_transport_event = proc(plugin: ^ap.Audio_Plugin, event: ap.Transport_Event) {
-        css_on_transport_event(cast(^Css_Corrector)plugin, event)
-    },
+make_param :: proc(id: Parameter, name: string, default_value: f64) -> Parameter_Info {
+    return {id, name, -500.0, 500.0, default_value, {.Is_Automatable}, ""}
+}
+
+debug :: proc(plugin: ^Audio_Plugin, msg: string) {
+    msg_with_newline := strings.concatenate({msg, "\n"})
+    defer delete(msg_with_newline)
+    sync.lock(&plugin.debug_string_mutex)
+    strings.write_string(&plugin.debug_string_builder, msg_with_newline)
+    plugin.debug_string_changed = true
+    sync.unlock(&plugin.debug_string_mutex)
 }
