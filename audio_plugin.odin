@@ -204,6 +204,11 @@ get_instance :: proc "c" (plugin: ^Clap_Plugin) -> ^Audio_Plugin {
 clap_plugin_init :: proc "c" (plugin: ^Clap_Plugin) -> bool {
     context = runtime.default_context()
     plugin := get_instance(plugin)
+
+    for parameter in Parameter {
+        reset_parameter_to_default(plugin, parameter)
+    }
+
     // plugin.clap_host_log = cast(^Clap_Host_Log)(plugin.clap_host->get_extension(CLAP_EXT_LOG))
     plugin.clap_host_timer_support = cast(^Clap_Host_Timer_Support)plugin.clap_host->get_extension(CLAP_EXT_TIMER_SUPPORT)
     plugin.clap_host_latency = cast(^Clap_Host_Latency)(plugin.clap_host->get_extension(CLAP_EXT_LATENCY))
