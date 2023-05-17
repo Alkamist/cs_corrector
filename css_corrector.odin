@@ -3,8 +3,8 @@ package main
 import "core:fmt"
 import "core:sync"
 import "core:strings"
-import "reaper"
 import nq "note_queue"
+import "reaper"
 
 // =====================================================================
 ID :: "com.alkamist.CssCorrector"
@@ -32,11 +32,7 @@ Audio_Plugin :: struct {
     debug_string_mutex: sync.Mutex,
     debug_string_builder: strings.Builder,
     debug_string_changed: bool,
-
-    note_queue: nq.Note_Queue,
-    held_key: Maybe(int),
-    hold_pedal_is_virtually_held: bool,
-    hold_pedal_is_physically_held: bool,
+    logic: Cs_Corrector_Logic,
 }
 
 on_create :: proc(plugin: ^Audio_Plugin) {
@@ -57,88 +53,46 @@ on_create :: proc(plugin: ^Audio_Plugin) {
         }
     })
 
-    plugin.note_queue = nq.create(0, 1024)
+    plugin.logic.plugin = plugin
+    plugin.logic.note_queue = nq.create(0, 1024)
+    plugin.logic.legato_delay_velocities[0] = 20
+    plugin.logic.legato_delay_velocities[1] = 64
+    plugin.logic.legato_delay_velocities[2] = 100
+    plugin.logic.legato_delay_velocities[3] = 128
+    update_logic_parameters(plugin)
 }
 
 on_destroy :: proc(plugin: ^Audio_Plugin) {
     unregister_timer(plugin, "Debug_Timer")
     strings.builder_destroy(&plugin.debug_string_builder)
-    nq.destroy(&plugin.note_queue)
+    cs_corrector_destroy(&plugin.logic)
 }
 
 on_activate :: proc(plugin: ^Audio_Plugin) {
-    set_latency(plugin, required_latency(plugin))
+    update_logic_parameters(plugin)
 }
 
 on_deactivate :: proc(plugin: ^Audio_Plugin) {
 }
 
 on_reset :: proc(plugin: ^Audio_Plugin) {
-    reset_corrector_state(plugin)
+    cs_corrector_reset(&plugin.logic)
 }
 
 on_parameter_event :: proc(plugin: ^Audio_Plugin, event: Parameter_Event) {
-    set_latency(plugin, required_latency(plugin))
+    update_logic_parameters(plugin)
 }
 
 on_transport_event :: proc(plugin: ^Audio_Plugin, event: Transport_Event) {
-    if .Is_Playing in event.flags {
-        plugin.was_playing = plugin.is_playing
-        plugin.is_playing = true
-    } else {
-        plugin.was_playing = plugin.is_playing
-        plugin.is_playing = false
-        // Reset the note queue on playback stop.
-        if plugin.was_playing && !plugin.is_playing {
-            reset_corrector_state(plugin)
-        }
-    }
+    process_transport_event(&plugin.logic, event)
 }
 
 on_midi_event :: proc(plugin: ^Audio_Plugin, event: Midi_Event) {
-    // Don't process when project is not playing back so there isn't
-    // an annoying delay when drawing notes on the piano roll
-    if !plugin.is_playing {
-        send_midi_event(plugin, event)
-        return
-    }
-
-    msg := event.data
-    status_code := msg[0] & 0xF0
-
-    is_note_off := status_code == 0x80
-    if is_note_off {
-        process_note_off(plugin, event.time, int(msg[1]), f64(msg[2]))
-        return
-    }
-
-    is_note_on := status_code == 0x90
-    if is_note_on {
-        process_note_on(plugin, event.time, int(msg[1]), f64(msg[2]))
-        return
-    }
-
-    is_cc := status_code == 0xB0
-    is_hold_pedal := is_cc && msg[1] == 64
-    if is_hold_pedal {
-        is_held := msg[2] > 63
-        process_hold_pedal(plugin, is_held)
-        // Don't return because we need to send the hold pedal information
-    }
-
-    // Pass any events that aren't note on or off straight to the host
-    event := event
-    event.time += plugin.latency
-    send_midi_event(plugin, event)
+    process_midi_event(&plugin.logic, event)
 }
 
 on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
-    nq.send_events(&plugin.note_queue, frame_count, plugin,
-        proc(plugin: rawptr, kind: nq.Note_Event_Kind, time, channel, key: int, velocity: f64)
-    {
-        plugin := cast(^Audio_Plugin)plugin
-        send_midi_event(plugin, encode_note_as_midi_event(kind, time, channel, key, velocity))
-    })
+    send_note_events(&plugin.logic, frame_count)
 }
 
 save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
@@ -170,122 +124,11 @@ debug :: proc(plugin: ^Audio_Plugin, arg: any) {
     free_all(context.temp_allocator)
 }
 
-encode_note_as_midi_event :: proc(kind: nq.Note_Event_Kind, time, channel, key: int, velocity: f64) -> Midi_Event {
-    status := channel
-    switch kind {
-    case .Off: status += 0x80
-    case .On: status += 0x90
-    }
-    return Midi_Event{
-        time = time,
-        port = 0,
-        data = {u8(status), u8(key), u8(velocity)},
-    }
-}
-
-
-
-
-
-reset_corrector_state :: proc(plugin: ^Audio_Plugin) {
-    nq.reset(&plugin.note_queue)
-    plugin.held_key = nil
-    plugin.hold_pedal_is_virtually_held = false
-    plugin.hold_pedal_is_physically_held = false
-}
-
-required_latency :: proc(plugin: ^Audio_Plugin) -> int {
-    return -min(
-        0,
-        legato_first_note_delay(plugin),
-        legato_portamento_delay(plugin),
-        legato_slow_delay(plugin),
-        legato_medium_delay(plugin),
-        legato_fast_delay(plugin),
-    )
-}
-
-process_note_on :: proc(plugin: ^Audio_Plugin, time, key: int, velocity: f64) {
-    delay := required_latency(plugin)
-
-    _, key_is_held := plugin.held_key.?
-
-    if key_is_held || plugin.hold_pedal_is_virtually_held {
-        if velocity <= 20 {
-            delay += legato_portamento_delay(plugin)
-        } else if velocity > 20 && velocity <= 64 {
-            delay += legato_slow_delay(plugin)
-        } else if velocity > 64 && velocity <= 100 {
-            delay += legato_medium_delay(plugin)
-        } else {
-            delay += legato_fast_delay(plugin)
-        }
-    } else {
-        delay += legato_first_note_delay(plugin)
-    }
-
-    plugin.held_key = key
-
-    nq.add_event(
-        &plugin.note_queue,
-        .On,
-        time + delay,
-        0, key, velocity,
-    )
-
-    // The virtual hold pedal waits to activate until after the first note on
-    if plugin.hold_pedal_is_physically_held {
-        plugin.hold_pedal_is_virtually_held = true
-    }
-}
-
-process_note_off :: proc(plugin: ^Audio_Plugin, time, key: int, velocity: f64) {
-    held_key, _key_is_held := plugin.held_key.?
-
-    if _key_is_held && held_key == key {
-        plugin.held_key = nil
-    }
-
-    delay := required_latency(plugin)
-
-    nq.add_event(
-        &plugin.note_queue,
-        .Off,
-        time + delay,
-        0, key, velocity,
-    )
-}
-
-process_hold_pedal :: proc(plugin: ^Audio_Plugin, is_held: bool) {
-    plugin.hold_pedal_is_physically_held = is_held
-    if is_held {
-        // Only hold down the virtual hold pedal if there is already a key held
-        _, key_is_held := plugin.held_key.?
-        if key_is_held {
-            plugin.hold_pedal_is_virtually_held = true
-        }
-    } else {
-        // The virtual hold pedal is always released with the real one
-        plugin.hold_pedal_is_virtually_held = false
-    }
-}
-
-legato_first_note_delay :: proc(plugin: ^Audio_Plugin) -> int {
-    return milliseconds_to_samples(plugin, parameter(plugin, .Legato_First_Note_Delay))
-}
-
-legato_portamento_delay :: proc(plugin: ^Audio_Plugin) -> int {
-    return milliseconds_to_samples(plugin, parameter(plugin, .Legato_Portamento_Delay))
-}
-
-legato_slow_delay :: proc(plugin: ^Audio_Plugin) -> int {
-    return milliseconds_to_samples(plugin, parameter(plugin, .Legato_Slow_Delay))
-}
-
-legato_medium_delay :: proc(plugin: ^Audio_Plugin) -> int {
-    return milliseconds_to_samples(plugin, parameter(plugin, .Legato_Medium_Delay))
-}
-
-legato_fast_delay :: proc(plugin: ^Audio_Plugin) -> int {
-    return milliseconds_to_samples(plugin, parameter(plugin, .Legato_Fast_Delay))
+update_logic_parameters :: proc(plugin: ^Audio_Plugin) {
+    plugin.logic.legato_first_note_delay = milliseconds_to_samples(plugin, parameter(plugin, .Legato_First_Note_Delay))
+    plugin.logic.legato_delay_times[0] = milliseconds_to_samples(plugin, parameter(plugin, .Legato_Portamento_Delay))
+    plugin.logic.legato_delay_times[1] = milliseconds_to_samples(plugin, parameter(plugin, .Legato_Slow_Delay))
+    plugin.logic.legato_delay_times[2] = milliseconds_to_samples(plugin, parameter(plugin, .Legato_Medium_Delay))
+    plugin.logic.legato_delay_times[3] = milliseconds_to_samples(plugin, parameter(plugin, .Legato_Fast_Delay))
+    set_latency(plugin, required_latency(&plugin.logic))
 }

@@ -31,7 +31,6 @@ create :: proc(len, cap: int, allocator := context.allocator) -> (result: Note_Q
 
 destroy :: proc(nq: ^Note_Queue) {
     delete(nq.note_events)
-    free(nq)
 }
 
 reset :: proc(nq: ^Note_Queue) {
