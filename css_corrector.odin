@@ -27,13 +27,13 @@ Parameter :: enum {
 
 Audio_Plugin :: struct {
     using base: Audio_Plugin_Base,
-    note_queue: nq.Note_Queue,
     is_playing: bool,
     was_playing: bool,
     debug_string_mutex: sync.Mutex,
     debug_string_builder: strings.Builder,
     debug_string_changed: bool,
 
+    note_queue: nq.Note_Queue,
     held_key: Maybe(int),
     hold_pedal_is_virtually_held: bool,
     hold_pedal_is_physically_held: bool,
@@ -74,7 +74,7 @@ on_deactivate :: proc(plugin: ^Audio_Plugin) {
 }
 
 on_reset :: proc(plugin: ^Audio_Plugin) {
-    nq.reset(&plugin.note_queue)
+    reset_corrector_state(plugin)
 }
 
 on_parameter_event :: proc(plugin: ^Audio_Plugin, event: Parameter_Event) {
@@ -90,7 +90,7 @@ on_transport_event :: proc(plugin: ^Audio_Plugin, event: Transport_Event) {
         plugin.is_playing = false
         // Reset the note queue on playback stop.
         if plugin.was_playing && !plugin.is_playing {
-            nq.reset(&plugin.note_queue)
+            reset_corrector_state(plugin)
         }
     }
 }
@@ -139,8 +139,6 @@ on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
         plugin := cast(^Audio_Plugin)plugin
         send_midi_event(plugin, encode_note_as_midi_event(kind, time, channel, key, velocity))
     })
-    // debug(plugin, fmt.tprint(plugin.note_queue.key_notes))
-    // free_all(context.temp_allocator)
 }
 
 save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
@@ -162,13 +160,14 @@ make_param :: proc(id: Parameter, name: string, default_value: f64) -> Parameter
     return {id, name, -500.0, 500.0, default_value, {.Is_Automatable}, ""}
 }
 
-debug :: proc(plugin: ^Audio_Plugin, msg: string) {
-    msg_with_newline := strings.concatenate({msg, "\n"})
-    defer delete(msg_with_newline)
+debug :: proc(plugin: ^Audio_Plugin, arg: any) {
+    msg := fmt.tprint(arg)
+    msg_with_newline := strings.concatenate({msg, "\n"}, context.temp_allocator)
     sync.lock(&plugin.debug_string_mutex)
     strings.write_string(&plugin.debug_string_builder, msg_with_newline)
     plugin.debug_string_changed = true
     sync.unlock(&plugin.debug_string_mutex)
+    free_all(context.temp_allocator)
 }
 
 encode_note_as_midi_event :: proc(kind: nq.Note_Event_Kind, time, channel, key: int, velocity: f64) -> Midi_Event {
@@ -188,6 +187,13 @@ encode_note_as_midi_event :: proc(kind: nq.Note_Event_Kind, time, channel, key: 
 
 
 
+reset_corrector_state :: proc(plugin: ^Audio_Plugin) {
+    nq.reset(&plugin.note_queue)
+    plugin.held_key = nil
+    plugin.hold_pedal_is_virtually_held = false
+    plugin.hold_pedal_is_physically_held = false
+}
+
 required_latency :: proc(plugin: ^Audio_Plugin) -> int {
     return -min(
         0,
@@ -196,7 +202,7 @@ required_latency :: proc(plugin: ^Audio_Plugin) -> int {
         legato_slow_delay(plugin),
         legato_medium_delay(plugin),
         legato_fast_delay(plugin),
-    ) * 2
+    )
 }
 
 process_note_on :: proc(plugin: ^Audio_Plugin, time, key: int, velocity: f64) {
