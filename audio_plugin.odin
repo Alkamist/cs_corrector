@@ -293,6 +293,8 @@ clap_plugin_process :: proc "c" (plugin: ^Clap_Plugin, process: ^Clap_Process) -
         frame = next_event_index
     }
 
+    on_process(plugin, int(process.frames_count))
+
     // Sort and send output events, then clear the buffer.
     slice.sort_by(plugin.output_events[:], proc(i, j: Clap_Event_Union) -> bool {
         i := i
