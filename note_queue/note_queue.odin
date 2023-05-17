@@ -3,6 +3,7 @@ package note_queue
 import "core:mem"
 
 KEY_COUNT :: 128
+CHANNEL_COUNT :: 16
 
 Note_Event_Kind :: enum {
     Off,
@@ -20,8 +21,8 @@ Note_Event :: struct {
 Note_Queue :: struct {
     playhead: int,
     note_events: [dynamic]Note_Event,
-    last_event_sent: [KEY_COUNT]Maybe(Note_Event),
-    pending_note_off_count: [KEY_COUNT]int,
+    last_event_sent: [CHANNEL_COUNT][KEY_COUNT]Maybe(Note_Event),
+    pending_note_off_count: [CHANNEL_COUNT][KEY_COUNT]int,
 }
 
 create :: proc(len, cap: int, allocator := context.allocator) -> (result: Note_Queue, err: mem.Allocator_Error) #optional_allocator_error {
@@ -36,9 +37,11 @@ destroy :: proc(nq: ^Note_Queue) {
 reset :: proc(nq: ^Note_Queue) {
     nq.playhead = 0
     clear(&nq.note_events)
-    for key in 0 ..< KEY_COUNT {
-        nq.last_event_sent[key] = nil
-        nq.pending_note_off_count[key] = 0
+    for channel in 0 ..< CHANNEL_COUNT {
+        for key in 0 ..< KEY_COUNT {
+            nq.last_event_sent[channel][key] = nil
+            nq.pending_note_off_count[channel][key] = 0
+        }
     }
 }
 
@@ -83,25 +86,28 @@ send_events :: proc(
 
         // Send the event if it is inside the frame count.
         if offset < frame_count {
-            if last_event, ok := nq.last_event_sent[event.key].?; ok {
+            channel := event.channel
+            key := event.key
+
+            if last_event, ok := nq.last_event_sent[channel][key].?; ok {
                 // If two note-ons in a row are detected,
                 // send a note off first to avoid overlaps.
                 if last_event.kind == .On && event.kind == .On {
-                    send_proc(user_data, .Off, offset, event.channel, event.key, 0.0)
-                    nq.last_event_sent[event.key] = event
-                    nq.pending_note_off_count[event.key] += 1
+                    send_proc(user_data, .Off, offset, channel, key, 0.0)
+                    nq.last_event_sent[channel][key] = event
+                    nq.pending_note_off_count[channel][key] += 1
                 }
             }
 
             // Always send note-ons, but ignore lingering note-offs that
             // were sent early because of a note-on overlap.
-            if event.kind == .On || nq.pending_note_off_count[event.key] == 0 {
-                send_proc(user_data, event.kind, offset, event.channel, event.key, event.velocity)
-                nq.last_event_sent[event.key] = event
+            if event.kind == .On || nq.pending_note_off_count[channel][key] == 0 {
+                send_proc(user_data, event.kind, offset, channel, key, event.velocity)
+                nq.last_event_sent[channel][key] = event
             } else {
-                nq.pending_note_off_count[event.key] -= 1
-                if nq.pending_note_off_count[event.key] < 0 {
-                    nq.pending_note_off_count[event.key] = 0
+                nq.pending_note_off_count[channel][key] -= 1
+                if nq.pending_note_off_count[channel][key] < 0 {
+                    nq.pending_note_off_count[channel][key] = 0
                 }
             }
 
