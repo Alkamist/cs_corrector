@@ -104,19 +104,19 @@ Audio_Plugin_Base :: struct {
     output_events: [dynamic]Clap_Event_Union,
 }
 
-milliseconds_to_samples :: proc(plugin: ^Audio_Plugin, milliseconds: f64) -> int {
+milliseconds_to_samples :: proc "c" (plugin: ^Audio_Plugin, milliseconds: f64) -> int {
     return int(plugin.sample_rate * milliseconds * 0.001)
 }
 
-parameter :: proc(plugin: ^Audio_Plugin, id: Parameter) -> f64 {
+parameter :: proc "c" (plugin: ^Audio_Plugin, id: Parameter) -> f64 {
     return sync.atomic_load(&plugin.parameter_values[id])
 }
 
-set_parameter :: proc(plugin: ^Audio_Plugin, id: Parameter, value: f64) {
+set_parameter :: proc "c" (plugin: ^Audio_Plugin, id: Parameter, value: f64) {
     sync.atomic_store(&plugin.parameter_values[id], value)
 }
 
-reset_parameter_to_default :: proc(plugin: ^Audio_Plugin, id: Parameter) {
+reset_parameter_to_default :: proc "c" (plugin: ^Audio_Plugin, id: Parameter) {
     set_parameter(plugin, id, parameter_info[id].default_value)
 }
 
@@ -143,7 +143,7 @@ unregister_timer :: proc(plugin: ^Audio_Plugin, name: string) {
     }
 }
 
-set_latency :: proc(plugin: ^Audio_Plugin, value: int) {
+set_latency :: proc "c" (plugin: ^Audio_Plugin, value: int) {
     plugin.latency = value
     if plugin.clap_host_latency == nil ||
        plugin.clap_host_latency.changed == nil ||
@@ -201,9 +201,20 @@ get_instance :: proc "c" (plugin: ^Clap_Plugin) -> ^Audio_Plugin {
     return cast(^Audio_Plugin)plugin.plugin_data
 }
 
+get_context :: proc "c" (plugin: ^Audio_Plugin) -> (result: runtime.Context) {
+    // result.allocator.procedure = runtime.default_allocator_proc
+    // result.allocator.data = nil
+    // result.temp_allocator.procedure = runtime.arena_allocator_proc
+    // result.temp_allocator.data = &runtime.global_default_temp_allocator_data
+    // result.assertion_failure_proc = runtime.default_assertion_failure_proc
+    // result.logger.procedure = runtime.default_logger_proc
+    // result.logger.data = nil
+    return runtime.default_context()
+}
+
 clap_plugin_init :: proc "c" (plugin: ^Clap_Plugin) -> bool {
-    context = runtime.default_context()
     plugin := get_instance(plugin)
+    context = get_context(plugin)
 
     for parameter in Parameter {
         reset_parameter_to_default(plugin, parameter)
@@ -218,8 +229,8 @@ clap_plugin_init :: proc "c" (plugin: ^Clap_Plugin) -> bool {
 }
 
 clap_plugin_destroy :: proc "c" (plugin: ^Clap_Plugin) {
-    context = runtime.default_context()
     plugin := get_instance(plugin)
+    context = get_context(plugin)
     on_destroy(plugin)
     delete(plugin.timer_name_to_id)
     delete(plugin.timer_id_to_proc)
@@ -227,8 +238,8 @@ clap_plugin_destroy :: proc "c" (plugin: ^Clap_Plugin) {
 }
 
 clap_plugin_activate :: proc "c" (plugin: ^Clap_Plugin, sample_rate: f64, min_frames_count, max_frames_count: u32) -> bool {
-    context = runtime.default_context()
     plugin := get_instance(plugin)
+    context = get_context(plugin)
     plugin.sample_rate = sample_rate
     plugin.min_frame_count = int(min_frames_count)
     plugin.max_frame_count = int(max_frames_count)
@@ -238,8 +249,8 @@ clap_plugin_activate :: proc "c" (plugin: ^Clap_Plugin, sample_rate: f64, min_fr
 }
 
 clap_plugin_deactivate :: proc "c" (plugin: ^Clap_Plugin) {
-    context = runtime.default_context()
     plugin := get_instance(plugin)
+    context = get_context(plugin)
     plugin.is_active = false
     on_deactivate(plugin)
 }
@@ -252,14 +263,14 @@ clap_plugin_stop_processing :: proc "c" (plugin: ^Clap_Plugin) {
 }
 
 clap_plugin_reset :: proc "c" (plugin: ^Clap_Plugin) {
-    context = runtime.default_context()
     plugin := get_instance(plugin)
+    context = get_context(plugin)
     resize(&plugin.output_events, 0)
 }
 
 clap_plugin_process :: proc "c" (plugin: ^Clap_Plugin, process: ^Clap_Process) -> Clap_Process_Status {
-    context = runtime.default_context()
     plugin := get_instance(plugin)
+    context = get_context(plugin)
 
     frame_count := process.frames_count
     event_count := process.in_events->size()
@@ -333,12 +344,10 @@ clap_plugin_on_main_thread :: proc "c" (plugin: ^Clap_Plugin) {
 
 clap_extension_parameters := Clap_Plugin_Params{
     count = proc "c" (plugin: ^Clap_Plugin) -> u32 {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
         return len(Parameter)
     },
     get_info = proc "c" (plugin: ^Clap_Plugin, param_index: u32, param_info: ^Clap_Param_Info) -> bool {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
         if len(Parameter) == 0 {
             return false
@@ -353,7 +362,6 @@ clap_extension_parameters := Clap_Plugin_Params{
         return true
     },
     get_value = proc "c" (plugin: ^Clap_Plugin, param_id: Clap_Id, out_value: ^f64) -> bool {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
         if len(Parameter) == 0 {
             return false
@@ -362,21 +370,22 @@ clap_extension_parameters := Clap_Plugin_Params{
         return true
     },
     value_to_text = proc "c" (plugin: ^Clap_Plugin, param_id: Clap_Id, value: f64, out_buffer: [^]byte, out_buffer_capacity: u32) -> bool {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
         if len(Parameter) == 0 {
             return false
         }
+        context = get_context(plugin)
         value_string := fmt.aprintf("%v", value)
+        defer delete(value_string)
         write_string(out_buffer[:out_buffer_capacity], value_string)
         return true
     },
     text_to_value = proc "c" (plugin: ^Clap_Plugin, param_id: Clap_Id, param_value_text: cstring, out_value: ^f64) -> bool {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
         if len(Parameter) == 0 {
             return false
         }
+        context = get_context(plugin)
         value, ok := strconv.parse_f64(cast(string)param_value_text)
         if ok {
             out_value^ = value
@@ -386,8 +395,8 @@ clap_extension_parameters := Clap_Plugin_Params{
         }
     },
     flush = proc "c" (plugin: ^Clap_Plugin, input: ^Clap_Input_Events, output: ^Clap_Output_Events) {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
+        context = get_context(plugin)
         event_count := input->size()
         for i in 0 ..< event_count {
             event_header := input->get(i)
@@ -418,8 +427,8 @@ clap_extension_note_ports := Clap_Plugin_Note_Ports{
 
 clap_extension_timer := Clap_Plugin_Timer_Support{
     on_timer = proc "c" (clap_plugin: ^Clap_Plugin, timer_id: Clap_Id) {
-        context = runtime.default_context()
         plugin := get_instance(clap_plugin)
+        context = get_context(plugin)
         if timer_proc, ok := plugin.timer_id_to_proc[timer_id]; ok {
             timer_proc(plugin)
         }
@@ -428,8 +437,8 @@ clap_extension_timer := Clap_Plugin_Timer_Support{
 
 clap_extension_state := Clap_Plugin_State{
     save = proc "c" (plugin: ^Clap_Plugin, stream: ^Clap_Ostream) -> bool {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
+        context = get_context(plugin)
 
         builder := strings.builder_make_none()
         defer strings.builder_destroy(&builder)
@@ -463,8 +472,8 @@ clap_extension_state := Clap_Plugin_State{
         return true
     },
     load = proc "c" (plugin: ^Clap_Plugin, stream: ^Clap_Istream) -> bool {
-        context = runtime.default_context()
         plugin := get_instance(plugin)
+        context = get_context(plugin)
 
         preset_data: [dynamic]byte
         defer delete(preset_data)
@@ -533,13 +542,13 @@ clap_plugin_factory := Clap_Plugin_Factory{
 
 @export
 clap_entry := Clap_Plugin_Entry{
-	clap_version = CLAP_VERSION,
-	init = proc "c" (plugin_path: cstring) -> bool {
+    clap_version = CLAP_VERSION,
+    init = proc "c" (plugin_path: cstring) -> bool {
         return true
     },
-	deinit = proc "c" () {
+    deinit = proc "c" () {
     },
-	get_factory = proc "c" (factory_id: cstring) -> rawptr {
+    get_factory = proc "c" (factory_id: cstring) -> rawptr {
         if factory_id == CLAP_PLUGIN_FACTORY_ID {
             return &clap_plugin_factory
         }

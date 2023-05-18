@@ -26,7 +26,7 @@ Note_Queue :: struct {
 }
 
 create :: proc(len, cap: int, allocator := context.allocator) -> (result: Note_Queue, err: mem.Allocator_Error) #optional_allocator_error {
-    return Note_Queue{note_events = make([dynamic]Note_Event, len, cap) or_return}, nil
+    return Note_Queue{note_events = make([dynamic]Note_Event, len, cap, allocator) or_return}, nil
 }
 
 destroy :: proc(nq: ^Note_Queue) {

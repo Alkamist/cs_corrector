@@ -96,10 +96,26 @@ on_process :: proc(plugin: ^Audio_Plugin, frame_count: int) {
 }
 
 save_preset :: proc(plugin: ^Audio_Plugin, builder: ^strings.Builder) -> bool {
-    return false
+    preset := Css_Corrector_Preset_V1{
+        size = size_of(Css_Corrector_Preset_V1),
+        preset_version = 1,
+        parameter_offset = i64le(offset_of(Css_Corrector_Preset_V1, parameters)),
+        parameter_count = len(Parameter),
+    }
+    for id in Parameter {
+        preset.parameters[id] = f64le(parameter(plugin, id))
+    }
+    preset_data := transmute([size_of(preset)]byte)preset
+    strings.write_bytes(builder, preset_data[:])
+    return true
 }
 
 load_preset :: proc(plugin: ^Audio_Plugin, data: []byte) {
+    preset := (cast(^Css_Corrector_Preset_V1)&data[0])^
+    for id in Parameter {
+        set_parameter(plugin, id, f64(preset.parameters[id]))
+    }
+    update_logic_parameters(plugin)
 }
 
 parameter_info := [len(Parameter)]Parameter_Info{
@@ -115,13 +131,14 @@ make_param :: proc(id: Parameter, name: string, default_value: f64) -> Parameter
 }
 
 debug :: proc(plugin: ^Audio_Plugin, arg: any) {
-    msg := fmt.tprint(arg)
-    msg_with_newline := strings.concatenate({msg, "\n"}, context.temp_allocator)
+    msg := fmt.aprint(arg)
+    defer delete(msg)
+    msg_with_newline := strings.concatenate({msg, "\n"})
+    defer delete(msg_with_newline)
     sync.lock(&plugin.debug_string_mutex)
     strings.write_string(&plugin.debug_string_builder, msg_with_newline)
     plugin.debug_string_changed = true
     sync.unlock(&plugin.debug_string_mutex)
-    free_all(context.temp_allocator)
 }
 
 update_logic_parameters :: proc(plugin: ^Audio_Plugin) {
@@ -131,4 +148,16 @@ update_logic_parameters :: proc(plugin: ^Audio_Plugin) {
     plugin.logic.legato_delay_times[2] = milliseconds_to_samples(plugin, parameter(plugin, .Legato_Medium_Delay))
     plugin.logic.legato_delay_times[3] = milliseconds_to_samples(plugin, parameter(plugin, .Legato_Fast_Delay))
     set_latency(plugin, required_latency(&plugin.logic))
+}
+
+
+
+
+
+Css_Corrector_Preset_V1 :: struct {
+    size: i64le,
+    preset_version: i64le,
+    parameter_offset: i64le,
+    parameter_count: i64le,
+    parameters: [Parameter]f64le,
 }
